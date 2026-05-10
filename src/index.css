@@ -1,0 +1,41 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    -webkit-tap-highlight-color: transparent;
+    @apply bg-space-black text-white antialiased;
+    overflow: hidden;
+  }
+}
+
+@layer components {
+  .glass-card {
+    @apply bg-white/5 backdrop-blur-xl border border-white/10 rounded-[2.5rem] shadow-2xl;
+  }
+  
+  .glass-button {
+    @apply relative overflow-hidden rounded-2xl font-bold transition-all active:scale-95 border border-white/10 backdrop-blur-md;
+  }
+
+  .neon-text {
+    text-shadow: 0 0 10px rgba(0, 242, 255, 0.5);
+  }
+
+  .bubble-glow {
+    @apply absolute -z-10 blur-[80px] rounded-full;
+  }
+}
+
+.safe-top {
+  padding-top: env(safe-area-inset-top);
+}
+
+.safe-bottom {
+  padding-bottom: calc(1.5rem + env(safe-area-inset-bottom));
+}
+
+::-webkit-scrollbar {
+  width: 0px;
+}

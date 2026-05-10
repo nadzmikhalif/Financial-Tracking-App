@@ -1,0 +1,45 @@
+[
+  {
+    "id": 1778408000000,
+    "filename": "dummy_transport.jpg",
+    "timestamp": "2026-05-10T11:00:00.000Z",
+    "status": "Success",
+    "amount": "25.50",
+    "company": "Grab / Uber",
+    "date": "2026-05-10",
+    "time": "09:45",
+    "category": "Transportation"
+  },
+  {
+    "id": 1778408100000,
+    "filename": "dummy_others.jpg",
+    "timestamp": "2026-05-10T11:05:00.000Z",
+    "status": "Success",
+    "amount": "150.00",
+    "company": "Local Bookstore",
+    "date": "2026-05-09",
+    "time": "14:20",
+    "category": "Others"
+  },
+  {
+    "id": 1778407586630,
+    "filename": "1778407581524.jpg",
+    "timestamp": "2026-05-10T10:06:26.630Z",
+    "status": "Success",
+    "amount": 780,
+    "company": "Sri Computers SB-Lowyat",
+    "date": "2026-03-01",
+    "time": "17:31",
+    "category": "Computer"
+  },
+  {
+    "id": 1778402026621,
+    "filename": "IMG_1778402024128.jpg",
+    "timestamp": "2026-05-10T08:33:46.621Z",
+    "status": "Success",
+    "amount": "75.42",
+    "company": "Wayne Corp",
+    "date": "2026-05-10",
+    "category": "Food"
+  }
+]
