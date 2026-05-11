@@ -22,7 +22,7 @@ interface Transaction {
 
 type ViewState = 'HOME' | 'CAPTURE' | 'SUCCESS';
 
-const CATEGORY_ICON_SIZE = 20;
+const CATEGORY_ICON_SIZE = 24;
 
 // --- Helper for Category Styling ---
 const getCategoryStyle = (category: string) => {
@@ -371,11 +371,13 @@ function CaptureView({ onBack, onSuccess }: { onBack: () => void, onSuccess: (da
     <div className="flex flex-col h-full z-10">
       <header className="safe-top p-6 flex items-center justify-between shrink-0">
         <button onClick={onBack} className="p-3 glass-card !rounded-2xl border-white/5"><ArrowLeft size={20} /></button>
-        <p className="text-xs font-black tracking-[0.3em] text-white/40 uppercase">Choose Upload Option</p>
         <div className="w-12"></div>
       </header>
       
       <main className="flex-1 flex flex-col items-center justify-center p-6 min-h-0">
+        {!previewUrl && (
+          <p className="text-xs font-black tracking-[0.3em] text-white/40 uppercase mb-8">Choose Upload Option</p>
+        )}
         <div className="w-full aspect-[3/4] glass-card overflow-hidden relative border-white/10 p-2">
           {previewUrl ? (
             <div className="w-full h-full relative group">
