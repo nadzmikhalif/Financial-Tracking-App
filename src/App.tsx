@@ -17,23 +17,26 @@ interface Transaction {
   category: string;
   status: string;
   aiError?: string;
+  image_url?: string;
 }
 
 type ViewState = 'HOME' | 'CAPTURE' | 'SUCCESS';
+
+const CATEGORY_ICON_SIZE = 20;
 
 // --- Helper for Category Styling ---
 const getCategoryStyle = (category: string) => {
   const normalized = category?.toLowerCase() || '';
   if (normalized.includes('food')) {
-    return { color: 'text-green-400', bg: 'from-green-500/20 to-emerald-500/20', icon: Utensils };
+    return { color: 'text-green-400', bg: 'from-green-500/20 to-emerald-500/20', icon: Utensils, size: 24 };
   }
   if (normalized.includes('transportation')) {
-    return { color: 'text-yellow-400', bg: 'from-yellow-500/20 to-orange-500/20', icon: Car };
+    return { color: 'text-yellow-400', bg: 'from-yellow-500/20 to-orange-500/20', icon: Car, size: 24 };
   }
   if (normalized.includes('computer')) {
-    return { color: 'text-blue-400', bg: 'from-blue-500/20 to-cyan-500/20', icon: Monitor };
+    return { color: 'text-blue-400', bg: 'from-blue-500/20 to-cyan-500/20', icon: Monitor, size: 24 };
   }
-  return { color: 'text-gray-400', bg: 'from-gray-500/20 to-slate-500/20', icon: MoreHorizontal };
+  return { color: 'text-gray-400', bg: 'from-gray-500/20 to-slate-500/20', icon: MoreHorizontal, size: 24 };
 };
 
 // --- Main App Component ---
@@ -43,16 +46,60 @@ export default function App() {
   const [currentTransaction, setCurrentTransaction] = useState<Transaction | null>(null);
   const [loading, setLoading] = useState(true);
   const [focusedTransaction, setFocusedTransaction] = useState<Transaction | null>(null);
+  const [showFullImage, setShowFullImage] = useState(false);
+  const [isFullImageClosing, setIsFullImageClosing] = useState(false);
+  const touchStart = useRef<{ x: number, y: number } | null>(null);
+
+  const closeFullImage = () => {
+    if (!showFullImage || isFullImageClosing) return;
+    setIsFullImageClosing(true);
+    window.requestAnimationFrame(() => {
+      setTimeout(() => {
+        setShowFullImage(false);
+        setIsFullImageClosing(false);
+      }, 220);
+    });
+  };
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStart.current = {
+      x: e.touches[0].clientX,
+      y: e.touches[0].clientY
+    };
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!touchStart.current) return;
+
+    const deltaX = Math.abs(e.touches[0].clientX - touchStart.current.x);
+    const deltaY = Math.abs(e.touches[0].clientY - touchStart.current.y);
+
+    // If swiped more than 50px in any direction, close with animation
+    if (deltaX > 50 || deltaY > 50) {
+      closeFullImage();
+      touchStart.current = null;
+    }
+  };
+
+  const handleTouchEnd = () => {
+    touchStart.current = null;
+  };
 
   const fetchTransactions = () => {
     setLoading(true);
     fetch('/api/transactions')
-      .then(res => res.json())
-      .then(data => {
+      .then(async res => {
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.error || 'Database connection failed');
+        }
         setTransactions(data);
         setLoading(false);
       })
-      .catch(() => setLoading(false));
+      .catch((err) => {
+        alert(err.message || 'Connection error');
+        setLoading(false);
+      });
   };
 
   useEffect(() => {
@@ -69,12 +116,21 @@ export default function App() {
           setFocusedTransaction(null);
           fetchTransactions();
         } else {
-          alert('Delete failed');
+          const data = await res.json();
+          alert(data.error || 'Delete failed');
         }
       } catch (e) {
         alert('Connection error');
       }
     }
+  };
+
+  // Helper to format currency
+  const formatAmount = (amount: string | number) => {
+    const num = typeof amount === 'string' ? parseFloat(amount) : amount;
+    if (isNaN(num)) return '0';
+    const rounded = Math.round(num * 100) / 100;
+    return Number.isInteger(rounded) ? rounded.toString() : rounded.toFixed(2);
   };
 
   return (
@@ -89,6 +145,7 @@ export default function App() {
           loading={loading} 
           onNew={() => setView('CAPTURE')} 
           onFocus={setFocusedTransaction}
+          formatAmount={formatAmount}
         />
       )}
       
@@ -106,6 +163,7 @@ export default function App() {
         <SuccessView 
           transaction={currentTransaction} 
           onDone={() => setView('HOME')} 
+          formatAmount={formatAmount}
         />
       )}
 
@@ -115,17 +173,50 @@ export default function App() {
         const Icon = style.icon;
         return (
           <div 
-            onClick={() => setFocusedTransaction(null)}
+            onClick={() => { setFocusedTransaction(null); setShowFullImage(false); }}
             className="absolute inset-0 z-[100] flex items-center justify-center p-6 backdrop-blur-md bg-black/60 transition-all cursor-pointer"
           >
+            {/* Full Screen Image Overlay (Lightbox) */}
+            {showFullImage && focusedTransaction.image_url && (
+              <div 
+                onClick={(e) => { e.stopPropagation(); closeFullImage(); }}
+                onTouchStart={handleTouchStart}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleTouchEnd}
+                className={`fixed inset-0 z-[200] bg-black/80 flex items-center justify-center cursor-zoom-out ${isFullImageClosing ? 'image-lightbox-hide' : 'image-lightbox-show'}`}
+              >
+                <img 
+                  src={focusedTransaction.image_url} 
+                  className={`w-full h-full object-contain max-w-[95vw] max-h-[95vh] ${isFullImageClosing ? 'image-content-hide' : 'image-content-show'}`} 
+                  alt="Full Receipt" 
+                />
+                <button onClick={(e) => { e.stopPropagation(); closeFullImage(); }} className={`absolute top-8 right-8 p-3 bg-white/10 backdrop-blur-xl rounded-full border border-white/20 text-white ${isFullImageClosing ? 'image-control-hide' : 'image-control-show'}`}>
+                  <X size={24} />
+                </button>
+              </div>
+            )}
+
             <div 
               onClick={(e) => e.stopPropagation()}
               className={`w-full glass-card p-6 animate-in zoom-in-95 duration-200 cursor-default border-white/10 ${focusedTransaction.aiError ? 'border-red-500/30' : ''}`}
             >
-               <div className="flex flex-col items-center text-center mb-8">
-                  <div className={`w-20 h-20 rounded-2xl bg-gradient-to-br flex items-center justify-center border border-white/10 mb-4 ${focusedTransaction.aiError ? 'from-red-500/20 to-orange-500/20' : style.bg}`}>
-                    {focusedTransaction.aiError ? <AlertCircle size={32} className="text-red-400" /> : <Icon size={32} className={style.color} />}
-                  </div>
+               <div className="flex flex-col items-center text-center mb-6">
+                  {focusedTransaction.image_url ? (
+                    <div 
+                      onClick={() => setShowFullImage(true)}
+                      className="w-full mb-6 rounded-2xl overflow-hidden border border-white/10 glass-card h-40 cursor-zoom-in group relative"
+                    >
+                      <img 
+                        src={focusedTransaction.image_url} 
+                        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" 
+                        alt="Receipt" 
+                      />
+                    </div>
+                  ) : (
+                    <div className={`w-12 h-12 rounded-2xl bg-gradient-to-br flex items-center justify-center border border-white/10 mb-4 ${focusedTransaction.aiError ? 'from-red-500/20 to-orange-500/20' : style.bg}`}>
+                      {focusedTransaction.aiError ? <AlertCircle size={CATEGORY_ICON_SIZE} className="text-red-400" /> : <Icon size={style.size} className={style.color} />}
+                    </div>
+                  )}
                   <h2 className="text-2xl font-black text-white leading-tight">{focusedTransaction.company}</h2>
                   <p className={`${focusedTransaction.aiError ? 'text-red-400' : style.color} text-xs font-bold uppercase tracking-widest mt-1`}>
                     {focusedTransaction.aiError ? 'Error' : focusedTransaction.category}
@@ -135,7 +226,7 @@ export default function App() {
                <div className="space-y-4 mb-10">
                   <div className="flex justify-between items-center py-3 border-b border-white/5">
                      <span className="text-white/40 text-xs font-bold uppercase">Amount</span>
-                     <span className="text-2xl font-black text-white neon-text">${focusedTransaction.amount}</span>
+                     <span className="text-2xl font-black text-white neon-text whitespace-nowrap">RM {formatAmount(focusedTransaction.amount)}</span>
                   </div>
                   <div className="flex justify-between items-center py-3 border-b border-white/5">
                      <span className="text-white/40 text-xs font-bold uppercase">Date & Time</span>
@@ -149,7 +240,7 @@ export default function App() {
 
                <div className="grid grid-cols-2 gap-4">
                   <button 
-                    onClick={() => setFocusedTransaction(null)}
+                    onClick={() => { setFocusedTransaction(null); setShowFullImage(false); }}
                     className="flex items-center justify-center gap-2 py-4 bg-white/5 border border-white/10 rounded-2xl text-white font-bold active:scale-95 transition-all"
                   >
                     <ArrowLeftCircle size={20} /> BACK
@@ -170,7 +261,13 @@ export default function App() {
 }
 
 // --- View: Home ---
-function HomeView({ transactions, loading, onNew, onFocus }: { transactions: Transaction[], loading: boolean, onNew: () => void, onFocus: (t: Transaction) => void }) {
+function HomeView({ transactions, loading, onNew, onFocus, formatAmount }: { 
+  transactions: Transaction[], 
+  loading: boolean, 
+  onNew: () => void, 
+  onFocus: (t: Transaction) => void,
+  formatAmount: (a: string | number) => string
+}) {
   return (
     <div className="flex flex-col h-full z-10">
       <header className="safe-top px-6 py-6 shrink-0">
@@ -204,14 +301,14 @@ function HomeView({ transactions, loading, onNew, onFocus }: { transactions: Tra
                   <div className="flex justify-between items-start mb-4">
                     <div className="flex items-center gap-3">
                       <div className={`w-12 h-12 rounded-2xl bg-gradient-to-br flex items-center justify-center border border-white/10 ${t.aiError ? 'from-red-500/20 to-orange-500/20' : style.bg}`}>
-                        {t.aiError ? <AlertCircle size={20} className="text-red-400" /> : <Icon size={20} className={style.color} />}
+                        {t.aiError ? <AlertCircle size={CATEGORY_ICON_SIZE} className="text-red-400" /> : <Icon size={style.size} className={style.color} />}
                       </div>
                       <div>
                         <p className="font-bold text-white text-lg leading-tight">{t.company}</p>
                         <p className={`text-xs font-medium tracking-wide ${t.aiError ? 'text-white/40' : style.color}`}>{t.aiError ? 'Processing Error' : t.category}</p>
                       </div>
                     </div>
-                    <p className="text-xl font-black text-white neon-text">${t.amount}</p>
+                    <p className="text-xl font-black text-white neon-text whitespace-nowrap">RM {formatAmount(t.amount)}</p>
                   </div>
                   <div className="flex justify-between items-center text-[10px] uppercase tracking-widest font-bold text-white/30">
                     <span>{t.date} {t.time && <span className="ml-2 text-neon-blue/40">{t.time}</span>}</span>
@@ -240,6 +337,7 @@ function CaptureView({ onBack, onSuccess }: { onBack: () => void, onSuccess: (da
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -273,7 +371,7 @@ function CaptureView({ onBack, onSuccess }: { onBack: () => void, onSuccess: (da
     <div className="flex flex-col h-full z-10">
       <header className="safe-top p-6 flex items-center justify-between shrink-0">
         <button onClick={onBack} className="p-3 glass-card !rounded-2xl border-white/5"><ArrowLeft size={20} /></button>
-        <p className="text-xs font-black tracking-[0.3em] text-white/40 uppercase">A.I. Visual Scan</p>
+        <p className="text-xs font-black tracking-[0.3em] text-white/40 uppercase">Choose Upload Option</p>
         <div className="w-12"></div>
       </header>
       
@@ -286,15 +384,27 @@ function CaptureView({ onBack, onSuccess }: { onBack: () => void, onSuccess: (da
               <button onClick={() => { setSelectedImage(null); setPreviewUrl(null); }} className="absolute top-4 right-4 p-3 bg-black/50 backdrop-blur-xl rounded-2xl border border-white/10"><X size={20} /></button>
             </div>
           ) : (
-            <button onClick={() => fileInputRef.current?.click()} className="w-full h-full flex flex-col items-center justify-center gap-6">
-              <div className="w-20 h-20 rounded-full bg-white/5 flex items-center justify-center border border-white/10 animate-float">
-                <Camera size={32} className="text-neon-blue" />
-              </div>
-              <div className="text-center">
-                <p className="text-lg font-bold text-white mb-1">Initialize Sensor</p>
-                <p className="text-white/30 text-xs">Tap to activate camera</p>
-              </div>
-            </button>
+            <div className="w-full h-full flex flex-col items-center justify-center gap-8">
+              <button onClick={() => fileInputRef.current?.click()} className="flex flex-col items-center gap-3 group">
+                <div className="text-center">
+                  <p className="text-sm font-bold text-white uppercase tracking-widest">Camera</p>
+                </div>
+                <div className="w-20 h-20 rounded-full bg-white/5 flex items-center justify-center border border-white/10 group-active:scale-95 transition-all">
+                  <Camera size={32} className="text-neon-blue" />
+                </div>
+              </button>
+
+              <div className="w-32 h-px bg-white/5"></div>
+
+              <button onClick={() => galleryInputRef.current?.click()} className="flex flex-col items-center gap-3 group">
+                <div className="text-center">
+                  <p className="text-sm font-bold text-white uppercase tracking-widest">Gallery</p>
+                </div>
+                <div className="w-20 h-20 rounded-full bg-white/5 flex items-center justify-center border border-white/10 group-active:scale-95 transition-all">
+                  <Upload size={32} className="text-neon-blue/60" />
+                </div>
+              </button>
+            </div>
           )}
           {/* Scanning Animation */}
           {isProcessing && (
@@ -304,6 +414,7 @@ function CaptureView({ onBack, onSuccess }: { onBack: () => void, onSuccess: (da
           )}
         </div>
         <input type="file" accept="image/*" capture="environment" ref={fileInputRef} onChange={handleFileChange} className="hidden" />
+        <input type="file" accept="image/*" ref={galleryInputRef} onChange={handleFileChange} className="hidden" />
       </main>
       
       <footer className="safe-bottom px-6 shrink-0 py-4">
@@ -328,7 +439,11 @@ function CaptureView({ onBack, onSuccess }: { onBack: () => void, onSuccess: (da
 }
 
 // --- View: Success ---
-function SuccessView({ transaction, onDone }: { transaction: Transaction | null, onDone: () => void }) {
+function SuccessView({ transaction, onDone, formatAmount }: { 
+  transaction: Transaction | null, 
+  onDone: () => void,
+  formatAmount: (a: string | number) => string
+}) {
   if (!transaction) return null;
   const isError = !!transaction.aiError;
   const style = getCategoryStyle(transaction.category);
@@ -370,7 +485,7 @@ function SuccessView({ transaction, onDone }: { transaction: Transaction | null,
 
               <div className="flex justify-between items-center">
                 <div className="flex items-center gap-3">
-                  <div className={`p-2 bg-white/5 rounded-lg ${style.color}`}><Icon size={16} /></div>
+                  <div className={`w-12 h-12 flex items-center justify-center rounded-lg bg-white/5 ${style.color}`}><Icon size={style.size} /></div>
                   <span className="text-white/50 text-xs font-bold uppercase tracking-tighter">Category</span>
                 </div>
                 <span className={`${style.bg} ${style.color} px-3 py-1 rounded-full text-[10px] font-black uppercase border border-white/10`}>
@@ -388,7 +503,7 @@ function SuccessView({ transaction, onDone }: { transaction: Transaction | null,
 
               <div className="pt-4 mt-4 border-t border-white/5 flex justify-between items-center">
                  <span className="text-white/30 text-[10px] uppercase font-black tracking-widest">Total Credit</span>
-                 <span className="text-3xl font-black text-white neon-text">${transaction.amount}</span>
+                 <span className="text-3xl font-black text-white neon-text whitespace-nowrap">RM {formatAmount(transaction.amount)}</span>
               </div>
             </>
           )}

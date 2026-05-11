@@ -26,6 +26,62 @@
   .bubble-glow {
     @apply absolute -z-10 blur-[80px] rounded-full;
   }
+
+  .image-lightbox-show {
+    animation: image-lightbox-show 220ms ease-out forwards;
+  }
+
+  .image-lightbox-hide {
+    animation: image-lightbox-hide 200ms ease-in forwards;
+  }
+
+  .image-content-show {
+    animation: image-content-show 240ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  .image-content-hide {
+    animation: image-content-hide 200ms ease-in forwards;
+  }
+
+  .image-control-show {
+    animation: image-control-show 260ms ease-out forwards;
+  }
+
+  .image-control-hide {
+    animation: image-control-hide 180ms ease-in forwards;
+  }
+}
+
+@layer utilities {
+  @keyframes image-lightbox-show {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  @keyframes image-lightbox-hide {
+    from { opacity: 1; }
+    to { opacity: 0; }
+  }
+
+  @keyframes image-content-show {
+    from { opacity: 0; transform: translateY(24px) scale(0.97); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  @keyframes image-content-hide {
+    from { opacity: 1; transform: translateY(0) scale(1); }
+    to { opacity: 0; transform: translateY(24px) scale(0.98); }
+  }
+
+  @keyframes image-control-show {
+    from { opacity: 0; transform: translateY(-10px) scale(0.95); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  @keyframes image-control-hide {
+    from { opacity: 1; }
+    to { opacity: 0; }
+  }
 }
 
 .safe-top {

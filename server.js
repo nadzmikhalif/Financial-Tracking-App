@@ -1,6 +1,6 @@
 // --- DOCUMENTATION ---
 // This server handles image uploads, image compression via Sharp,
-// real AI receipt processing via Google Gemini, and data persistence.
+// real AI receipt processing via Google Gemini, and data persistence via Supabase.
 
 require('dotenv').config();
 const express = require('express');
@@ -10,9 +10,21 @@ const fs = require('fs');
 const sharp = require('sharp');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const rateLimit = require('express-rate-limit');
+const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 app.use(express.json());
+
+// Initialize Supabase Client
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabase = (supabaseUrl && supabaseKey && supabaseUrl !== 'your_supabase_project_url') 
+  ? createClient(supabaseUrl, supabaseKey) 
+  : null;
+
+if (!supabase) {
+  console.log('[ERROR] Supabase credentials missing or default. Application will not function correctly.');
+}
 
 // Configure Rate Limiter: Maximum 4 requests per minute
 const aiRateLimiter = rateLimit({
@@ -25,47 +37,7 @@ const aiRateLimiter = rateLimit({
 
 // Initialize Gemini Client
 const apiKey = (process.env.GEMINI_API_KEY || '').trim().replace(/^["']|["']$/g, '');
-console.log('-------------------------------------------');
-console.log(`[System] Gemini API Key Status: ${apiKey ? 'Loaded' : 'MISSING'}`);
-console.log(`[System] Key Length: ${apiKey.length} characters`);
-if (apiKey === 'your_gemini_api_key_here' || apiKey === '') {
-  console.log('[WARNING] Please set GEMINI_API_KEY in your .env file');
-}
-console.log('-------------------------------------------');
-
 const genAI = new GoogleGenerativeAI(apiKey);
-
-// Path to the JSON "database"
-const DB_FILE = path.join(__dirname, 'database.json');
-
-// Function to read data from the JSON file
-const readDB = () => {
-  if (!fs.existsSync(DB_FILE)) return [];
-  try {
-    const data = fs.readFileSync(DB_FILE, 'utf8');
-    return JSON.parse(data);
-  } catch (e) {
-    return [];
-  }
-};
-
-// Function to write data to the JSON file
-const writeDB = (data) => {
-  fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
-};
-
-// Initialize DB with a sample if empty
-if (readDB().length === 0) {
-  writeDB([{
-    id: 1,
-    filename: 'sample.jpg',
-    date: new Date().toISOString().split('T')[0],
-    amount: '42.00',
-    company: 'Neural Cafe',
-    category: 'Food',
-    status: 'Processed'
-  }]);
-}
 
 // Multer Storage Configuration (Temporary storage before compression)
 const storage = multer.diskStorage({
@@ -75,7 +47,6 @@ const storage = multer.diskStorage({
     cb(null, uploadDir);
   },
   filename: (req, file, cb) => {
-    // Save with a temp prefix, we will rename/overwrite during compression
     cb(null, `TEMP_${Date.now()}${path.extname(file.originalname)}`);
   }
 });
@@ -85,15 +56,12 @@ const upload = multer({ storage: storage });
  * Communicates with Google Gemini API to analyze receipt image.
  */
 async function processReceiptWithAI(imagePath) {
-  console.log(`[AI] Analyzing image with Gemini: ${imagePath}`);
-  
   try {
     if (!apiKey || apiKey === 'your_gemini_api_key_here') {
       throw new Error("GEMINI_API_KEY is not configured in .env file");
     }
 
     const model = genAI.getGenerativeModel({ model: "gemini-3.1-flash-lite" });
-    
     const imageData = fs.readFileSync(imagePath);
     const imagePart = {
       inlineData: {
@@ -107,8 +75,6 @@ async function processReceiptWithAI(imagePath) {
     const result = await model.generateContent([prompt, imagePart]);
     const response = await result.response;
     const responseText = response.text();
-    
-    console.log(`[AI] Gemini Response: ${responseText}`);
     
     const jsonMatch = responseText.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
@@ -129,28 +95,62 @@ async function processReceiptWithAI(imagePath) {
   }
 }
 
-// GET API: Retrieve all transactions
-app.get('/api/transactions', (req, res) => {
-  res.json(readDB());
+// GET API: Retrieve all transactions from Supabase
+app.get('/api/transactions', async (req, res) => {
+  if (!supabase) {
+    return res.status(503).json({ error: 'Supabase connection is not configured.' });
+  }
+
+  const { data, error } = await supabase
+    .from('transactions')
+    .select('*')
+    .order('id', { ascending: false });
+  
+  if (error) {
+    console.error('[Supabase] Fetch error:', error);
+    return res.status(500).json({ error: 'Failed to fetch transactions from Supabase.' });
+  }
+
+  res.json(data);
 });
 
 // DELETE API: Remove a transaction by ID
-app.delete('/api/transactions/:id', (req, res) => {
+app.delete('/api/transactions/:id', async (req, res) => {
+  if (!supabase) {
+    return res.status(503).json({ error: 'Supabase connection is not configured.' });
+  }
+
   const id = parseInt(req.params.id);
-  const db = readDB();
-  const filteredDB = db.filter(t => t.id !== id);
-  
-  if (db.length === filteredDB.length) {
-    return res.status(404).send('Transaction not found');
+
+  // 1. Get filename to delete from storage
+  const { data: record, error: fetchError } = await supabase.from('transactions').select('filename').eq('id', id).single();
+  if (fetchError) {
+    console.error('[Supabase] Record not found:', fetchError);
+    return res.status(404).json({ error: 'Transaction not found in database.' });
   }
   
-  writeDB(filteredDB);
-  console.log(`[System] Deleted transaction: ${id}`);
+  // 2. Delete from DB
+  const { error: dbError } = await supabase.from('transactions').delete().eq('id', id);
+  if (dbError) {
+    console.error('[Supabase] Delete error:', dbError);
+    return res.status(500).json({ error: 'Failed to delete record from database.' });
+  }
+  
+  // 3. Delete from Storage
+  if (record?.filename) {
+    await supabase.storage.from('receipts').remove([record.filename]);
+  }
+
+  console.log(`[Supabase] Deleted transaction: ${id}`);
   res.sendStatus(204);
 });
 
 // POST API: Upload image, COMPRESS IT, and trigger AI processing
 app.post('/api/upload', aiRateLimiter, upload.single('image'), async (req, res) => {
+  if (!supabase) {
+    return res.status(503).json({ error: 'Supabase connection is not configured.' });
+  }
+
   if (!req.file) return res.status(400).send('No image file uploaded.');
 
   const tempPath = req.file.path;
@@ -158,48 +158,77 @@ app.post('/api/upload', aiRateLimiter, upload.single('image'), async (req, res) 
   const finalPath = path.join('uploads', finalFilename);
 
   try {
-    console.log(`[System] Compressing image: ${tempPath}`);
-    
-    // 1. Compress Image using Sharp
-    // Resize to max 1200px width/height and reduce quality to 70%
+    // 1. Compress Image
     await sharp(tempPath)
       .resize(1200, 1200, { fit: 'inside', withoutEnlargement: true })
       .jpeg({ quality: 70 })
       .toFile(finalPath);
 
-    // 2. Delete the temporary uncompressed file
     fs.unlinkSync(tempPath);
 
-    // 3. Trigger AI Vision Processing on the compressed image
+    // 2. AI Vision Processing
     const aiData = await processReceiptWithAI(finalPath);
+    if (aiData.aiError) {
+       fs.unlinkSync(finalPath); // Cleanup compressed file on AI failure
+       return res.status(422).json(aiData);
+    }
 
-    // 4. Create the record
+    // 3. Create the record
     const newTransaction = {
       id: Date.now(),
       filename: finalFilename,
       timestamp: new Date().toISOString(),
-      status: aiData.aiError ? 'Error' : 'Success',
+      status: 'Success',
       ...aiData
     };
 
-    // 5. Save to JSON Database ONLY if there is no AI error
-    if (!aiData.aiError) {
-      const db = readDB();
-      db.unshift(newTransaction);
-      writeDB(db);
+    // 4. Upload to Supabase Storage
+    const fileBuffer = fs.readFileSync(finalPath);
+    const { error: storageError } = await supabase.storage
+      .from('receipts')
+      .upload(finalFilename, fileBuffer, {
+         contentType: 'image/jpeg',
+         upsert: true
+      });
+
+    if (storageError) {
+      fs.unlinkSync(finalPath);
+      console.error('[Supabase] Storage Upload Error:', storageError);
+      return res.status(500).json({ error: 'Failed to upload image to Supabase Storage.' });
     }
 
+    // 5. Get Public URL
+    const { data: { publicUrl } } = supabase.storage
+      .from('receipts')
+      .getPublicUrl(finalFilename);
+    
+    newTransaction.image_url = publicUrl;
+
+    // 6. Insert into Database
+    const { error: dbError } = await supabase
+      .from('transactions')
+      .insert([newTransaction]);
+    
+    if (dbError) {
+       // Rollback storage if DB fails
+       await supabase.storage.from('receipts').remove([finalFilename]);
+       fs.unlinkSync(finalPath);
+       console.error('[Supabase] DB Insert Error:', dbError);
+       return res.status(500).json({ error: 'Failed to save transaction data to Supabase.' });
+    }
+
+    // Cleanup local compressed file after successful upload
+    fs.unlinkSync(finalPath);
     res.json(newTransaction);
 
   } catch (error) {
     console.error('Critical Processing Error:', error);
-    // Cleanup temp file if it exists
     if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
-    res.status(500).send('Internal Server Error');
+    if (fs.existsSync(finalPath)) fs.unlinkSync(finalPath);
+    res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
-app.use('/images', express.static(path.join(__dirname, 'uploads')));
 app.use(express.static(path.join(__dirname, 'dist')));
 
 app.get('*', (req, res) => {
