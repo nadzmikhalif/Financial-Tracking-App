@@ -20,7 +20,7 @@ interface Transaction {
   image_url?: string;
 }
 
-type ViewState = 'HOME' | 'CAPTURE' | 'SUCCESS';
+type ViewState = 'HOME' | 'CAPTURE' | 'SUCCESS' | 'STATS';
 
 const CATEGORY_ICON_SIZE = 24;
 
@@ -133,20 +133,67 @@ export default function App() {
     return Number.isInteger(rounded) ? rounded.toString() : rounded.toFixed(2);
   };
 
+  // --- Global Swipe Logic ---
+  const handleGlobalTouchStart = (e: React.TouchEvent) => {
+    // Only handle swipes on HOME or STATS views
+    if (view !== 'HOME' && view !== 'STATS') return;
+    touchStart.current = {
+      x: e.touches[0].clientX,
+      y: e.touches[0].clientY
+    };
+  };
+
+  const handleGlobalTouchMove = (e: React.TouchEvent) => {
+    if (!touchStart.current) return;
+    
+    const deltaX = e.touches[0].clientX - touchStart.current.x;
+    const deltaY = Math.abs(e.touches[0].clientY - touchStart.current.y);
+
+    // If swiped horizontally more than 50px and vertically less than 50px
+    if (Math.abs(deltaX) > 80 && deltaY < 50) {
+      if (deltaX < 0 && view === 'HOME') {
+        // Swipe Right to Left -> GO TO STATS
+        setView('STATS');
+        touchStart.current = null;
+      } else if (deltaX > 0 && view === 'STATS') {
+        // Swipe Left to Right -> GO TO HOME
+        setView('HOME');
+        touchStart.current = null;
+      }
+    }
+  };
+
   return (
-    <div className="h-[100dvh] w-full max-w-md mx-auto bg-space-black relative overflow-hidden flex flex-col font-sans">
+    <div 
+      className="h-[100dvh] w-full max-w-md mx-auto bg-space-black relative overflow-hidden flex flex-col font-sans"
+      onTouchStart={handleGlobalTouchStart}
+      onTouchMove={handleGlobalTouchMove}
+    >
       {/* Background Glow Bubbles */}
       <div className="bubble-glow w-64 h-64 bg-neon-blue/10 top-[-10%] left-[-20%] animate-pulse-slow"></div>
       <div className="bubble-glow w-64 h-64 bg-neon-purple/10 bottom-[10%] right-[-20%] animate-pulse-slow"></div>
 
       {view === 'HOME' && (
-        <HomeView 
-          transactions={transactions} 
-          loading={loading} 
-          onNew={() => setView('CAPTURE')} 
-          onFocus={setFocusedTransaction}
-          formatAmount={formatAmount}
-        />
+        <div className="animate-slide-in-left h-full w-full">
+          <HomeView 
+            transactions={transactions} 
+            loading={loading} 
+            onNew={() => setView('CAPTURE')} 
+            onFocus={setFocusedTransaction}
+            onStats={() => setView('STATS')}
+            formatAmount={formatAmount}
+          />
+        </div>
+      )}
+
+      {view === 'STATS' && (
+        <div className="animate-slide-in-right h-full w-full">
+          <StatsView 
+            transactions={transactions} 
+            onBack={() => setView('HOME')} 
+            formatAmount={formatAmount}
+          />
+        </div>
       )}
       
       {view === 'CAPTURE' && (
@@ -261,11 +308,12 @@ export default function App() {
 }
 
 // --- View: Home ---
-function HomeView({ transactions, loading, onNew, onFocus, formatAmount }: { 
+function HomeView({ transactions, loading, onNew, onFocus, onStats, formatAmount }: { 
   transactions: Transaction[], 
   loading: boolean, 
   onNew: () => void, 
   onFocus: (t: Transaction) => void,
+  onStats: () => void,
   formatAmount: (a: string | number) => string
 }) {
   return (
@@ -273,12 +321,15 @@ function HomeView({ transactions, loading, onNew, onFocus, formatAmount }: {
       <header className="safe-top px-6 py-6 shrink-0">
         <div className="flex justify-between items-end">
           <div>
-            <p className="text-neon-blue text-xs font-bold tracking-[0.2em] uppercase mb-1">Jarvis 1.0</p>
+            <p className="text-neon-blue text-xs font-bold tracking-[0.2em] uppercase mb-1">Jarvis 1.1</p>
             <h1 className="text-3xl font-black tracking-tight">Activity</h1>
           </div>
-          <div className="p-3 glass-card rounded-2xl">
-            <Sparkles className="text-neon-blue" size={20} />
-          </div>
+          <button 
+            onClick={onStats}
+            className="p-3 glass-card rounded-2xl active:scale-95 transition-all border-white/10"
+          >
+            <FileText className="text-neon-blue" size={20} />
+          </button>
         </div>
       </header>
       
@@ -520,3 +571,122 @@ function SuccessView({ transaction, onDone, formatAmount }: {
     </div>
   );
 }
+
+// --- View: Stats ---
+function StatsView({ transactions, onBack, formatAmount }: { 
+  transactions: Transaction[], 
+  onBack: () => void,
+  formatAmount: (a: string | number) => string
+}) {
+  const validTransactions = transactions.filter(t => !t.aiError);
+  const totalAmount = validTransactions.reduce((sum, t) => sum + parseFloat(t.amount || '0'), 0);
+  
+  const categoryTotals: Record<string, number> = {};
+  validTransactions.forEach(t => {
+    const cat = t.category || 'Other';
+    categoryTotals[cat] = (categoryTotals[cat] || 0) + parseFloat(t.amount || '0');
+  });
+
+  const categoryStats = Object.entries(categoryTotals).map(([name, amount]) => ({
+    name,
+    amount,
+    percentage: totalAmount > 0 ? (amount / totalAmount) * 100 : 0,
+    style: getCategoryStyle(name)
+  })).sort((a, b) => b.amount - a.amount);
+
+  // SVG Donut Chart Constants
+  const size = 200;
+  const strokeWidth = 24;
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  let currentOffset = 0;
+
+  return (
+    <div className="flex flex-col h-full z-10">
+      <header className="safe-top p-6 flex items-center justify-center shrink-0">
+        <p className="text-xs font-black tracking-[0.3em] text-white/40 uppercase">Spendings Summary</p>
+      </header>
+
+      <main className="flex-1 overflow-y-auto px-6 py-2">
+        <div className="flex flex-col items-center mb-10">
+          <div className="relative w-[200px] h-[200px] mb-8">
+            <svg width={size} height={size} className="transform -rotate-90">
+              {/* Background circle */}
+              <circle
+                cx={size / 2}
+                cy={size / 2}
+                r={radius}
+                fill="transparent"
+                stroke="rgba(255,255,255,0.05)"
+                strokeWidth={strokeWidth}
+              />
+              {/* Segments */}
+              {categoryStats.map((stat, i) => {
+                const dashArray = (stat.percentage / 100) * circumference;
+                const strokeColor = stat.style.color.replace('text-', ''); // Rough conversion
+                // Map tailwind text colors to actual hex/rgb for SVG
+                const colorMap: Record<string, string> = {
+                  'green-400': '#4ade80',
+                  'yellow-400': '#facc15',
+                  'blue-400': '#60a5fa',
+                  'gray-400': '#9ca3af'
+                };
+                const color = colorMap[strokeColor] || '#9ca3af';
+                
+                const circle = (
+                  <circle
+                    key={i}
+                    cx={size / 2}
+                    cy={size / 2}
+                    r={radius}
+                    fill="transparent"
+                    stroke={color}
+                    strokeWidth={strokeWidth}
+                    strokeDasharray={`${dashArray} ${circumference}`}
+                    strokeDashoffset={-currentOffset}
+                    strokeLinecap="round"
+                    className="transition-all duration-1000 ease-out"
+                    style={{ filter: `drop-shadow(0 0 8px ${color}44)` }}
+                  />
+                );
+                currentOffset += dashArray;
+                return circle;
+              })}
+            </svg>
+            <div className="absolute inset-0 flex flex-col items-center justify-center">
+              <p className="text-white/40 text-[10px] font-black uppercase tracking-widest">Total Spent</p>
+              <p className="text-2xl font-black text-white neon-text">RM {formatAmount(totalAmount)}</p>
+            </div>
+          </div>
+
+          <div className="w-full space-y-3">
+            {categoryStats.map((stat, i) => {
+              const Icon = stat.style.icon;
+              return (
+                <div key={i} className="glass-card p-4 flex items-center justify-between border-white/5">
+                  <div className="flex items-center gap-4">
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center bg-white/5 ${stat.style.color}`}>
+                      <Icon size={20} />
+                    </div>
+                    <div>
+                      <p className="font-bold text-white capitalize">{stat.name}</p>
+                      <p className="text-[10px] text-white/40 font-black uppercase tracking-widest">{stat.percentage.toFixed(1)}% Usage</p>
+                    </div>
+                  </div>
+                  <p className="text-lg font-black text-white tracking-tight">RM {formatAmount(stat.amount)}</p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </main>
+
+      <footer className="safe-bottom px-6 shrink-0 py-4">
+        <button onClick={onBack} className="w-full h-16 bg-white/10 border border-white/10 text-white rounded-[2rem] font-black text-lg flex items-center justify-center gap-3 active:scale-95 transition-all">
+          <ArrowLeft size={20} /> RETURN TO LOG
+        </button>
+      </footer>
+    </div>
+  );
+}
+
