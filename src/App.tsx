@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-  Camera, Plus, History, X, Upload, ArrowLeft, CheckCircle2, FileText, 
-  Calendar, DollarSign, ArrowRight, Building2, Tag, Sparkles, AlertCircle, 
-  Trash2, ArrowLeftCircle, Utensils, Car, Monitor, MoreHorizontal 
+  Camera, Plus, X, Upload, ArrowLeft, CheckCircle2, FileText, 
+  Calendar, ArrowRight, Building2, Sparkles, AlertCircle, 
+  Trash2, ArrowLeftCircle, Utensils, Car, Monitor, MoreHorizontal, LogOut
 } from 'lucide-react';
+import { supabase } from "@/lib/supabase";
+import { SmokeyBackground, LoginForm, SignUpForm, VerifyRedirect } from "@/components/ui/login-form";
 
 // --- Types ---
 interface Transaction {
@@ -18,30 +20,32 @@ interface Transaction {
   status: string;
   aiError?: string;
   image_url?: string;
+  user_id?: string;
 }
 
 type ViewState = 'HOME' | 'CAPTURE' | 'SUCCESS' | 'STATS';
 
 const CATEGORY_ICON_SIZE = 24;
 
-// --- Helper for Category Styling ---
 const getCategoryStyle = (category: string) => {
   const normalized = category?.toLowerCase() || '';
   if (normalized.includes('food')) {
-    return { color: 'text-green-400', bg: 'from-green-500/20 to-emerald-500/20', icon: Utensils, size: 24 };
+    return { color: 'text-green-400', hex: '#4ade80', bg: 'from-green-500/20 to-emerald-500/20', icon: Utensils, size: 24 };
   }
   if (normalized.includes('transportation')) {
-    return { color: 'text-yellow-400', bg: 'from-yellow-500/20 to-orange-500/20', icon: Car, size: 24 };
+    return { color: 'text-yellow-400', hex: '#facc15', bg: 'from-yellow-500/20 to-orange-500/20', icon: Car, size: 24 };
   }
   if (normalized.includes('computer')) {
-    return { color: 'text-blue-400', bg: 'from-blue-500/20 to-cyan-500/20', icon: Monitor, size: 24 };
+    return { color: 'text-blue-400', hex: '#60a5fa', bg: 'from-blue-500/20 to-cyan-500/20', icon: Monitor, size: 24 };
   }
-  return { color: 'text-gray-400', bg: 'from-gray-500/20 to-slate-500/20', icon: MoreHorizontal, size: 24 };
+  return { color: 'text-gray-400', hex: '#94a3b8', bg: 'from-gray-500/20 to-slate-500/20', icon: MoreHorizontal, size: 24 };
 };
 
-// --- Main App Component ---
 export default function App() {
+  const [session, setSession] = useState<any>(null);
   const [view, setView] = useState<ViewState>('HOME');
+  const [isLoginView, setIsLoginView] = useState(true);
+  const [isVerifyView, setIsVerifyView] = useState(false);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [currentTransaction, setCurrentTransaction] = useState<Transaction | null>(null);
   const [loading, setLoading] = useState(true);
@@ -50,68 +54,82 @@ export default function App() {
   const [isFullImageClosing, setIsFullImageClosing] = useState(false);
   const touchStart = useRef<{ x: number, y: number } | null>(null);
 
+  useEffect(() => {
+    // Check for hash parameters on mount (e.g. #type=signup or #type=recovery)
+    const hash = window.location.hash;
+    if (hash.includes('type=signup') || hash.includes('type=recovery')) {
+      setIsVerifyView(true);
+      // Clear hash to prevent re-triggering on refresh
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+
+    supabase.auth.getSession().then(({ data: { session } }: any) => {
+      setSession(session);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event: string, session: any) => {
+      setSession(session);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const fetchTransactions = async () => {
+    if (!session) return;
+    setLoading(true);
+    try {
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      const res = await fetch('/api/transactions', {
+        headers: {
+          'Authorization': `Bearer ${currentSession?.access_token}`
+        }
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Fetch failed');
+      setTransactions(data);
+    } catch (err: any) {
+      console.error(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (session && view === 'HOME') {
+      fetchTransactions();
+    }
+  }, [session, view]);
+
   const closeFullImage = () => {
     if (!showFullImage || isFullImageClosing) return;
     setIsFullImageClosing(true);
-    window.requestAnimationFrame(() => {
-      setTimeout(() => {
-        setShowFullImage(false);
-        setIsFullImageClosing(false);
-      }, 220);
-    });
+    setTimeout(() => {
+      setShowFullImage(false);
+      setIsFullImageClosing(false);
+    }, 220);
   };
 
   const handleTouchStart = (e: React.TouchEvent) => {
-    touchStart.current = {
-      x: e.touches[0].clientX,
-      y: e.touches[0].clientY
-    };
+    touchStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
   };
 
   const handleTouchMove = (e: React.TouchEvent) => {
     if (!touchStart.current) return;
-
     const deltaX = Math.abs(e.touches[0].clientX - touchStart.current.x);
     const deltaY = Math.abs(e.touches[0].clientY - touchStart.current.y);
-
-    // If swiped more than 50px in any direction, close with animation
     if (deltaX > 50 || deltaY > 50) {
       closeFullImage();
       touchStart.current = null;
     }
   };
 
-  const handleTouchEnd = () => {
-    touchStart.current = null;
-  };
-
-  const fetchTransactions = () => {
-    setLoading(true);
-    fetch('/api/transactions')
-      .then(async res => {
-        const data = await res.json();
-        if (!res.ok) {
-          throw new Error(data.error || 'Database connection failed');
-        }
-        setTransactions(data);
-        setLoading(false);
-      })
-      .catch((err) => {
-        alert(err.message || 'Connection error');
-        setLoading(false);
-      });
-  };
-
-  useEffect(() => {
-    if (view === 'HOME') {
-      fetchTransactions();
-    }
-  }, [view]);
-
   const handleDelete = async (id: number) => {
-    if (window.confirm('Are you sure you want to permanently delete this transaction record?')) {
+    if (window.confirm('Delete this record?')) {
       try {
-        const res = await fetch(`/api/transactions/${id}`, { method: 'DELETE' });
+        const res = await fetch(`/api/transactions/${id}`, { 
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${session?.access_token}` }
+        });
         if (res.ok) {
           setFocusedTransaction(null);
           fetchTransactions();
@@ -119,13 +137,10 @@ export default function App() {
           const data = await res.json();
           alert(data.error || 'Delete failed');
         }
-      } catch (e) {
-        alert('Connection error');
-      }
+      } catch (e) { alert('Connection error'); }
     }
   };
 
-  // Helper to format currency
   const formatAmount = (amount: string | number) => {
     const num = typeof amount === 'string' ? parseFloat(amount) : amount;
     if (isNaN(num)) return '0';
@@ -133,35 +148,41 @@ export default function App() {
     return Number.isInteger(rounded) ? rounded.toString() : rounded.toFixed(2);
   };
 
-  // --- Global Swipe Logic ---
   const handleGlobalTouchStart = (e: React.TouchEvent) => {
-    // Only handle swipes on HOME or STATS views
     if (view !== 'HOME' && view !== 'STATS') return;
-    touchStart.current = {
-      x: e.touches[0].clientX,
-      y: e.touches[0].clientY
-    };
+    touchStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
   };
 
   const handleGlobalTouchMove = (e: React.TouchEvent) => {
     if (!touchStart.current) return;
-    
     const deltaX = e.touches[0].clientX - touchStart.current.x;
     const deltaY = Math.abs(e.touches[0].clientY - touchStart.current.y);
-
-    // If swiped horizontally more than 50px and vertically less than 50px
     if (Math.abs(deltaX) > 80 && deltaY < 50) {
-      if (deltaX < 0 && view === 'HOME') {
-        // Swipe Right to Left -> GO TO STATS
-        setView('STATS');
-        touchStart.current = null;
-      } else if (deltaX > 0 && view === 'STATS') {
-        // Swipe Left to Right -> GO TO HOME
-        setView('HOME');
-        touchStart.current = null;
-      }
+      if (deltaX < 0 && view === 'HOME') setView('STATS');
+      else if (deltaX > 0 && view === 'STATS') setView('HOME');
+      touchStart.current = null;
     }
   };
+
+  if (!session) {
+    return (
+      <main className="relative w-screen h-screen bg-gray-900 overflow-hidden">
+        <SmokeyBackground className="absolute inset-0" />
+        <div className="relative z-10 flex items-center justify-center w-full h-full p-4 -translate-y-[10px]">
+          {isVerifyView ? (
+            <VerifyRedirect onFinish={() => { 
+              setIsVerifyView(false); 
+              setIsLoginView(true); 
+            }} />
+          ) : isLoginView ? (
+            <LoginForm onToggle={() => setIsLoginView(false)} />
+          ) : (
+            <SignUpForm onToggle={() => setIsLoginView(true)} />
+          )}
+        </div>
+      </main>
+    );
+  }
 
   return (
     <div 
@@ -169,7 +190,6 @@ export default function App() {
       onTouchStart={handleGlobalTouchStart}
       onTouchMove={handleGlobalTouchMove}
     >
-      {/* Background Glow Bubbles */}
       <div className="bubble-glow w-64 h-64 bg-neon-blue/10 top-[-10%] left-[-20%] animate-pulse-slow"></div>
       <div className="bubble-glow w-64 h-64 bg-neon-purple/10 bottom-[10%] right-[-20%] animate-pulse-slow"></div>
 
@@ -179,125 +199,73 @@ export default function App() {
             transactions={transactions} 
             loading={loading} 
             onNew={() => setView('CAPTURE')} 
-            onFocus={setFocusedTransaction}
-            onStats={() => setView('STATS')}
-            formatAmount={formatAmount}
+            onFocus={setFocusedTransaction} 
+            onStats={() => setView('STATS')} 
+            formatAmount={formatAmount} 
+            onLogout={() => supabase.auth.signOut()} 
           />
         </div>
       )}
 
       {view === 'STATS' && (
         <div className="animate-slide-in-right h-full w-full">
-          <StatsView 
-            transactions={transactions} 
-            onBack={() => setView('HOME')} 
-            formatAmount={formatAmount}
-          />
+          <StatsView transactions={transactions} onBack={() => setView('HOME')} formatAmount={formatAmount} />
         </div>
       )}
       
       {view === 'CAPTURE' && (
         <CaptureView 
           onBack={() => setView('HOME')} 
-          onSuccess={(data) => {
+          onSuccess={(data: any) => {
             setCurrentTransaction(data);
             setView('SUCCESS');
           }} 
+          session={session}
         />
       )}
 
       {view === 'SUCCESS' && (
-        <SuccessView 
-          transaction={currentTransaction} 
-          onDone={() => setView('HOME')} 
-          formatAmount={formatAmount}
-        />
+        <SuccessView transaction={currentTransaction} onDone={() => setView('HOME')} formatAmount={formatAmount} />
       )}
 
-      {/* Focused Detail Modal */}
       {focusedTransaction && (() => {
         const style = getCategoryStyle(focusedTransaction.category);
         const Icon = style.icon;
         return (
-          <div 
-            onClick={() => { setFocusedTransaction(null); setShowFullImage(false); }}
-            className="absolute inset-0 z-[100] flex items-center justify-center p-6 backdrop-blur-md bg-black/60 transition-all cursor-pointer"
-          >
-            {/* Full Screen Image Overlay (Lightbox) */}
+          <div onClick={() => { setFocusedTransaction(null); setShowFullImage(false); }} className="absolute inset-0 z-[100] flex items-center justify-center p-6 backdrop-blur-md bg-black/60 transition-all cursor-pointer">
             {showFullImage && focusedTransaction.image_url && (
-              <div 
-                onClick={(e) => { e.stopPropagation(); closeFullImage(); }}
-                onTouchStart={handleTouchStart}
-                onTouchMove={handleTouchMove}
-                onTouchEnd={handleTouchEnd}
-                className={`fixed inset-0 z-[200] bg-black/80 flex items-center justify-center cursor-zoom-out ${isFullImageClosing ? 'image-lightbox-hide' : 'image-lightbox-show'}`}
-              >
-                <img 
-                  src={focusedTransaction.image_url} 
-                  className={`w-full h-full object-contain max-w-[95vw] max-h-[95vh] ${isFullImageClosing ? 'image-content-hide' : 'image-content-show'}`} 
-                  alt="Full Receipt" 
-                />
-                <button onClick={(e) => { e.stopPropagation(); closeFullImage(); }} className={`absolute top-8 right-8 p-3 bg-white/10 backdrop-blur-xl rounded-full border border-white/20 text-white ${isFullImageClosing ? 'image-control-hide' : 'image-control-show'}`}>
-                  <X size={24} />
-                </button>
+              <div onClick={(e) => { e.stopPropagation(); closeFullImage(); }} onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} className={`fixed inset-0 z-[200] bg-black/80 flex items-center justify-center cursor-zoom-out ${isFullImageClosing ? 'image-lightbox-hide' : 'image-lightbox-show'}`}>
+                <img src={focusedTransaction.image_url} className={`w-full h-full object-contain max-w-[95vw] max-h-[95vh] ${isFullImageClosing ? 'image-content-hide' : 'image-content-show'}`} alt="Full Receipt" />
+                <button onClick={(e) => { e.stopPropagation(); closeFullImage(); }} className="absolute top-8 right-8 p-3 bg-white/10 backdrop-blur-xl rounded-full border border-white/20 text-white"><X size={24} /></button>
               </div>
             )}
-
-            <div 
-              onClick={(e) => e.stopPropagation()}
-              className={`w-full glass-card p-6 animate-in zoom-in-95 duration-200 cursor-default border-white/10 ${focusedTransaction.aiError ? 'border-red-500/30' : ''}`}
-            >
+            <div onClick={(e) => e.stopPropagation()} className="w-full glass-card p-6 animate-in zoom-in-95 duration-200 cursor-default border-white/10">
                <div className="flex flex-col items-center text-center mb-6">
                   {focusedTransaction.image_url ? (
-                    <div 
-                      onClick={() => setShowFullImage(true)}
-                      className="w-full mb-6 rounded-2xl overflow-hidden border border-white/10 glass-card h-40 cursor-zoom-in group relative"
-                    >
-                      <img 
-                        src={focusedTransaction.image_url} 
-                        className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" 
-                        alt="Receipt" 
-                      />
+                    <div onClick={() => setShowFullImage(true)} className="w-full mb-6 rounded-2xl overflow-hidden border border-white/10 glass-card h-40 cursor-zoom-in group relative">
+                      <img src={focusedTransaction.image_url} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" alt="Receipt" />
                     </div>
                   ) : (
-                    <div className={`w-12 h-12 rounded-2xl bg-gradient-to-br flex items-center justify-center border border-white/10 mb-4 ${focusedTransaction.aiError ? 'from-red-500/20 to-orange-500/20' : style.bg}`}>
-                      {focusedTransaction.aiError ? <AlertCircle size={CATEGORY_ICON_SIZE} className="text-red-400" /> : <Icon size={style.size} className={style.color} />}
+                    <div className={`w-12 h-12 rounded-2xl bg-gradient-to-br flex items-center justify-center border border-white/10 mb-4 ${style.bg}`}>
+                      <Icon size={style.size} className={style.color} />
                     </div>
                   )}
                   <h2 className="text-2xl font-black text-white leading-tight">{focusedTransaction.company}</h2>
-                  <p className={`${focusedTransaction.aiError ? 'text-red-400' : style.color} text-xs font-bold uppercase tracking-widest mt-1`}>
-                    {focusedTransaction.aiError ? 'Error' : focusedTransaction.category}
-                  </p>
+                  <p className={`${style.color} text-xs font-bold uppercase tracking-widest mt-1`}>{focusedTransaction.category}</p>
                </div>
-
                <div className="space-y-4 mb-10">
                   <div className="flex justify-between items-center py-3 border-b border-white/5">
                      <span className="text-white/40 text-xs font-bold uppercase">Amount</span>
                      <span className="text-2xl font-black text-white neon-text whitespace-nowrap">RM {formatAmount(focusedTransaction.amount)}</span>
                   </div>
                   <div className="flex justify-between items-center py-3 border-b border-white/5">
-                     <span className="text-white/40 text-xs font-bold uppercase">Date & Time</span>
+                     <span className="text-white/40 text-xs font-bold uppercase">Date</span>
                      <span className="text-white/80 font-bold">{focusedTransaction.date} {focusedTransaction.time && <span className="ml-2 text-neon-blue/60">{focusedTransaction.time}</span>}</span>
                   </div>
-                  <div className="flex justify-between items-center py-3 border-b border-white/5 overflow-hidden">
-                     <span className="text-white/40 text-xs font-bold uppercase">ID</span>
-                     <span className="text-white/30 text-[10px] font-mono truncate ml-4">{focusedTransaction.filename}</span>
-                  </div>
                </div>
-
                <div className="grid grid-cols-2 gap-4">
-                  <button 
-                    onClick={() => { setFocusedTransaction(null); setShowFullImage(false); }}
-                    className="flex items-center justify-center gap-2 py-4 bg-white/5 border border-white/10 rounded-2xl text-white font-bold active:scale-95 transition-all"
-                  >
-                    <ArrowLeftCircle size={20} /> BACK
-                  </button>
-                  <button 
-                    onClick={() => handleDelete(focusedTransaction.id)}
-                    className="flex items-center justify-center gap-2 py-4 bg-red-500/10 border border-red-500/30 rounded-2xl text-red-400 font-bold active:scale-95 transition-all"
-                  >
-                    <Trash2 size={20} /> DELETE
-                  </button>
+                  <button onClick={() => setFocusedTransaction(null)} className="flex items-center justify-center gap-2 py-4 bg-white/5 border border-white/10 rounded-2xl text-white font-bold active:scale-95 transition-all"><ArrowLeftCircle size={20} /> BACK</button>
+                  <button onClick={() => handleDelete(focusedTransaction.id)} className="flex items-center justify-center gap-2 py-4 bg-red-500/10 border border-red-500/30 rounded-2xl text-red-400 font-bold active:scale-95 transition-all"><Trash2 size={20} /> DELETE</button>
                </div>
             </div>
           </div>
@@ -307,63 +275,44 @@ export default function App() {
   );
 }
 
-// --- View: Home ---
-function HomeView({ transactions, loading, onNew, onFocus, onStats, formatAmount }: { 
-  transactions: Transaction[], 
-  loading: boolean, 
-  onNew: () => void, 
-  onFocus: (t: Transaction) => void,
-  onStats: () => void,
-  formatAmount: (a: string | number) => string
-}) {
+function HomeView({ transactions, loading, onNew, onFocus, onStats, formatAmount, onLogout }: any) {
   return (
     <div className="flex flex-col h-full z-10">
       <header className="safe-top px-6 py-6 shrink-0">
         <div className="flex justify-between items-end">
           <div>
-            <p className="text-neon-blue text-xs font-bold tracking-[0.2em] uppercase mb-1">Jarvis 1.1</p>
+            <p className="text-neon-blue text-xs font-bold tracking-[0.2em] uppercase mb-1">Jarvis 2.0</p>
             <h1 className="text-3xl font-black tracking-tight">Activity</h1>
           </div>
-          <button 
-            onClick={onStats}
-            className="p-3 glass-card rounded-2xl active:scale-95 transition-all border-white/10"
-          >
-            <FileText className="text-neon-blue" size={20} />
-          </button>
+          <div className="flex gap-2">
+            <button onClick={onStats} className="p-3 glass-card rounded-2xl active:scale-95 transition-all border-white/10"><FileText className="text-neon-blue" size={20} /></button>
+            <button onClick={onLogout} className="p-3 glass-card rounded-2xl active:scale-95 transition-all border-white/10"><LogOut className="text-red-400" size={20} /></button>
+          </div>
         </div>
       </header>
-      
       <main className="flex-1 overflow-y-auto px-6 py-2">
         {loading ? (
-          <div className="flex justify-center items-center h-full">
-            <div className="w-12 h-12 border-4 border-neon-blue/20 border-t-neon-blue rounded-full animate-spin"></div>
-          </div>
+          <div className="flex justify-center items-center h-full"><div className="w-12 h-12 border-4 border-neon-blue/20 border-t-neon-blue rounded-full animate-spin"></div></div>
         ) : (
           <div className="space-y-4 pb-10">
-            {transactions.map(t => {
+            {transactions.map((t: any) => {
               const style = getCategoryStyle(t.category);
               const Icon = style.icon;
               return (
-                <div 
-                  key={t.id} 
-                  onClick={() => onFocus(t)}
-                  className={`glass-card p-5 group hover:bg-white/10 transition-all border-white/5 cursor-pointer active:scale-[0.98] ${t.aiError ? 'border-red-500/30' : ''}`}
-                >
+                <div key={t.id} onClick={() => onFocus(t)} className="glass-card p-5 group hover:bg-white/10 transition-all border-white/5 cursor-pointer active:scale-[0.98]">
                   <div className="flex justify-between items-start mb-4">
                     <div className="flex items-center gap-3">
-                      <div className={`w-12 h-12 rounded-2xl bg-gradient-to-br flex items-center justify-center border border-white/10 ${t.aiError ? 'from-red-500/20 to-orange-500/20' : style.bg}`}>
-                        {t.aiError ? <AlertCircle size={CATEGORY_ICON_SIZE} className="text-red-400" /> : <Icon size={style.size} className={style.color} />}
-                      </div>
+                      <div className={`w-12 h-12 rounded-2xl bg-gradient-to-br flex items-center justify-center border border-white/10 ${style.bg}`}><Icon size={style.size} className={style.color} /></div>
                       <div>
                         <p className="font-bold text-white text-lg leading-tight">{t.company}</p>
-                        <p className={`text-xs font-medium tracking-wide ${t.aiError ? 'text-white/40' : style.color}`}>{t.aiError ? 'Processing Error' : t.category}</p>
+                        <p className={`text-xs font-medium tracking-wide ${style.color}`}>{t.category}</p>
                       </div>
                     </div>
                     <p className="text-xl font-black text-white neon-text whitespace-nowrap">RM {formatAmount(t.amount)}</p>
                   </div>
-                  <div className="flex justify-between items-center text-[10px] uppercase tracking-widest font-bold text-white/30">
-                    <span>{t.date} {t.time && <span className="ml-2 text-neon-blue/40">{t.time}</span>}</span>
-                    {t.aiError && <span className="text-red-400/60">Failed</span>}
+                  <div className="text-[10px] uppercase tracking-widest font-bold text-white/30 flex gap-2">
+                    <span>{t.date}</span>
+                    {t.time && <span className="text-neon-blue/50">• {t.time}</span>}
                   </div>
                 </div>
               );
@@ -371,26 +320,21 @@ function HomeView({ transactions, loading, onNew, onFocus, onStats, formatAmount
           </div>
         )}
       </main>
-      
       <footer className="safe-bottom px-6 shrink-0 py-4">
-        <button onClick={onNew} className="w-full h-16 bg-white text-black rounded-[2rem] font-black text-lg flex items-center justify-center gap-3 shadow-[0_0_30px_rgba(255,255,255,0.2)] active:scale-95 transition-all">
-          <Plus size={24} strokeWidth={3} /> 
-          SCAN RECEIPT
-        </button>
+        <button onClick={onNew} className="w-full h-16 bg-white text-black rounded-[2rem] font-black text-lg flex items-center justify-center gap-3 shadow-[0_0_30px_rgba(255,255,255,0.2)] active:scale-95 transition-all"><Plus size={24} strokeWidth={3} /> SCAN RECEIPT</button>
       </footer>
     </div>
-  );
+  ); 
 }
 
-// --- View: Capture ---
-function CaptureView({ onBack, onSuccess }: { onBack: () => void, onSuccess: (data: Transaction) => void }) {
+function CaptureView({ onBack, onSuccess, session }: any) {
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = (e: any) => {
     const file = e.target.files?.[0];
     if (file) {
       setSelectedImage(file);
@@ -406,13 +350,16 @@ function CaptureView({ onBack, onSuccess }: { onBack: () => void, onSuccess: (da
     const formData = new FormData();
     formData.append('image', selectedImage);
     try {
-      const response = await fetch('/api/upload', { method: 'POST', body: formData });
+      const response = await fetch('/api/upload', { 
+        method: 'POST', 
+        body: formData,
+        headers: { 'Authorization': `Bearer ${session?.access_token}` }
+      });
       if (response.ok) {
-        const data = await response.json();
-        onSuccess(data);
-      } else { 
+        onSuccess(await response.json());
+      } else {
         const errData = await response.json();
-        alert(errData.aiError || 'Processing Failed'); 
+        alert(errData.aiError || errData.error || 'Processing Failed');
       }
     } catch (err) { alert('Network Error'); } 
     finally { setIsProcessing(false); }
@@ -427,13 +374,13 @@ function CaptureView({ onBack, onSuccess }: { onBack: () => void, onSuccess: (da
       
       <main className="flex-1 flex flex-col items-center justify-center p-6 min-h-0">
         {!previewUrl && (
-          <p className="text-xs font-black tracking-[0.3em] text-white/40 uppercase mb-8">Choose Upload Option</p>
+          <p className="text-xs font-black tracking-[0.3em] text-white/40 uppercase mb-8 text-center">Choose Upload Option</p>
         )}
         <div className="w-full aspect-[3/4] glass-card overflow-hidden relative border-white/10 p-2">
           {previewUrl ? (
             <div className="w-full h-full relative group">
               <img src={previewUrl} className="w-full h-full object-cover rounded-[2rem]" />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent"></div>
+              <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent rounded-[2rem]"></div>
               <button onClick={() => { setSelectedImage(null); setPreviewUrl(null); }} className="absolute top-4 right-4 p-3 bg-black/50 backdrop-blur-xl rounded-2xl border border-white/10"><X size={20} /></button>
             </div>
           ) : (
@@ -459,10 +406,9 @@ function CaptureView({ onBack, onSuccess }: { onBack: () => void, onSuccess: (da
               </button>
             </div>
           )}
-          {/* Scanning Animation */}
           {isProcessing && (
             <div className="absolute inset-0 z-20 pointer-events-none">
-              <div className="w-full h-1 bg-neon-blue shadow-[0_0_20px_#00f2ff] animate-[scan_2s_ease-in-out_infinite]"></div>
+              <div className="w-full h-1 bg-neon-blue shadow-[0_0_20px_#00f2ff] animate-scan"></div>
             </div>
           )}
         </div>
@@ -472,7 +418,7 @@ function CaptureView({ onBack, onSuccess }: { onBack: () => void, onSuccess: (da
       
       <footer className="safe-bottom px-6 shrink-0 py-4">
         {selectedImage && (
-          <button onClick={handleUpload} disabled={isProcessing} className="w-full h-16 bg-neon-blue text-black rounded-[2rem] font-black text-lg flex items-center justify-center gap-3 shadow-[0_0_40px_rgba(0,242,255,0.3)] disabled:opacity-50">
+          <button onClick={handleUpload} disabled={isProcessing} className="w-full h-16 bg-neon-blue text-black rounded-[2rem] font-black text-lg flex items-center justify-center gap-3 shadow-[0_0_40px_rgba(0,242,255,0.3)] disabled:opacity-50 transition-all">
             {isProcessing ? (
               <span className="flex items-center gap-3"><div className="w-5 h-5 border-2 border-black/20 border-t-black rounded-full animate-spin"></div> ANALYZING...</span>
             ) : (
@@ -484,178 +430,95 @@ function CaptureView({ onBack, onSuccess }: { onBack: () => void, onSuccess: (da
       <style>{`
         @keyframes scan {
           0%, 100% { transform: translateY(0); }
-          50% { transform: translateY(400px); }
+          50% { transform: translateY(350px); }
+        }
+        .animate-scan {
+           animation: scan 2s ease-in-out infinite;
         }
       `}</style>
     </div>
-  );
+  ); 
 }
 
-// --- View: Success ---
-function SuccessView({ transaction, onDone, formatAmount }: { 
-  transaction: Transaction | null, 
-  onDone: () => void,
-  formatAmount: (a: string | number) => string
-}) {
+function SuccessView({ transaction, onDone, formatAmount }: any) {
   if (!transaction) return null;
-  const isError = !!transaction.aiError;
   const style = getCategoryStyle(transaction.category);
-  const Icon = isError ? AlertCircle : style.icon;
-
   return (
     <div className="flex flex-col h-full z-10">
       <main className="flex-1 px-8 flex flex-col items-center justify-center text-center">
-        <div className={`w-24 h-24 rounded-full flex items-center justify-center mb-8 border shadow-[0_0_50px_rgba(0,242,255,0.1)] ${isError ? 'bg-red-500/10 border-red-500/30' : 'bg-neon-blue/10 border-neon-blue/30'}`}>
-          {isError ? <AlertCircle size={48} className="text-red-400" /> : <CheckCircle2 size={48} className="text-neon-blue" />}
-        </div>
+        <div className="w-24 h-24 rounded-full flex items-center justify-center mb-8 border border-neon-blue/30 bg-neon-blue/10"><CheckCircle2 size={48} className="text-neon-blue" /></div>
+        <h1 className="text-3xl font-black mb-8">Transaction Added</h1>
         
-        <h1 className="text-3xl font-black mb-2 tracking-tight">
-          {isError ? 'Processing Error' : 'Intelligence Acquired'}
-        </h1>
-        <p className={`text-sm mb-10 uppercase tracking-widest font-bold ${isError ? 'text-red-400/60' : 'text-white/40'}`}>
-          {isError ? 'System failed to analyze image' : 'Receipt Processed via Gemini'}
-        </p>
-        
-        <div className={`w-full glass-card p-6 space-y-6 border-white/10 text-left ${isError ? 'border-red-500/20' : ''}`}>
-          {isError ? (
-             <div className="bg-red-500/10 p-4 rounded-xl border border-red-500/20 max-h-[40vh] overflow-y-auto">
-               <div className="sticky top-0 bg-[#1a0b0b] pb-2">
-                 <p className="text-red-400 text-xs font-bold uppercase">Error Log</p>
-               </div>
-               <p className="text-white/70 text-sm leading-relaxed break-words">
-                 {transaction.aiError}
-               </p>
-             </div>
-          ) : (
-            <>
-              <div className="flex justify-between items-center group">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-white/5 rounded-lg text-neon-blue"><Building2 size={16} /></div>
-                  <span className="text-white/50 text-xs font-bold uppercase tracking-tighter">Vendor</span>
-                </div>
-                <span className="font-black text-white text-lg tracking-tight">{transaction.company}</span>
-              </div>
-
-              <div className="flex justify-between items-center">
-                <div className="flex items-center gap-3">
-                  <div className={`w-12 h-12 flex items-center justify-center rounded-lg bg-white/5 ${style.color}`}><Icon size={style.size} /></div>
-                  <span className="text-white/50 text-xs font-bold uppercase tracking-tighter">Category</span>
-                </div>
-                <span className={`${style.bg} ${style.color} px-3 py-1 rounded-full text-[10px] font-black uppercase border border-white/10`}>
-                  {transaction.category}
-                </span>
-              </div>
-
-              <div className="flex justify-between items-center">
-                <div className="flex items-center gap-3">
-                  <div className="p-2 bg-white/5 rounded-lg text-neon-blue"><Calendar size={16} /></div>
-                  <span className="text-white/50 text-xs font-bold uppercase tracking-tighter">Date & Time</span>
-                </div>
-                <span className="font-bold text-white/80">{transaction.date} {transaction.time && <span className="ml-2 text-neon-blue/60">{transaction.time}</span>}</span>
-              </div>
-
-              <div className="pt-4 mt-4 border-t border-white/5 flex justify-between items-center">
-                 <span className="text-white/30 text-[10px] uppercase font-black tracking-widest">Total Credit</span>
-                 <span className="text-3xl font-black text-white neon-text whitespace-nowrap">RM {formatAmount(transaction.amount)}</span>
-              </div>
-            </>
-          )}
+        <div className="w-full glass-card p-6 space-y-4 border-white/10 text-left mt-4">
+          <div className="flex justify-between items-center"><span className="text-white/50 text-xs font-bold uppercase text-left">Vendor</span><span className="font-black text-white text-lg text-right">{transaction.company}</span></div>
+          <div className="flex justify-between items-center"><span className="text-white/50 text-xs font-bold uppercase text-left">Category</span><span className={`${style.bg} ${style.color} px-3 py-1 rounded-full text-[10px] font-black uppercase text-right`}>{transaction.category}</span></div>
+          <div className="pt-4 border-t border-white/5 flex justify-between items-center"><span className="text-white/30 text-[10px] uppercase font-black">Total</span><span className="text-3xl font-black text-white neon-text">RM {formatAmount(transaction.amount)}</span></div>
         </div>
       </main>
-      
-      <footer className="safe-bottom px-6 shrink-0 py-4">
-        <button onClick={onDone} className="w-full h-16 bg-white/10 border border-white/10 text-white rounded-[2rem] font-black text-lg flex items-center justify-center gap-3 active:scale-95 transition-all">
-          CLOSE LOG <ArrowRight size={20} />
-        </button>
-      </footer>
+      <footer className="safe-bottom px-6 shrink-0 py-4"><button onClick={onDone} className="w-full h-16 bg-white/10 border border-white/10 text-white rounded-[2rem] font-black text-lg flex items-center justify-center gap-3">CLOSE LOG <ArrowRight size={20} /></button></footer>
     </div>
   );
 }
 
-// --- View: Stats ---
-function StatsView({ transactions, onBack, formatAmount }: { 
-  transactions: Transaction[], 
-  onBack: () => void,
-  formatAmount: (a: string | number) => string
-}) {
-  const validTransactions = transactions.filter(t => !t.aiError);
-  const totalAmount = validTransactions.reduce((sum, t) => sum + parseFloat(t.amount || '0'), 0);
-  
-  const categoryTotals: Record<string, number> = {};
-  validTransactions.forEach(t => {
-    const cat = t.category || 'Other';
-    categoryTotals[cat] = (categoryTotals[cat] || 0) + parseFloat(t.amount || '0');
-  });
-
-  const categoryStats = Object.entries(categoryTotals).map(([name, amount]) => ({
-    name,
-    amount,
-    percentage: totalAmount > 0 ? (amount / totalAmount) * 100 : 0,
-    style: getCategoryStyle(name)
+function StatsView({ transactions, onBack, formatAmount }: any) {
+  const validTransactions = transactions.filter((t: any) => !t.aiError);
+  const totalAmount = validTransactions.reduce((sum: number, t: any) => sum + parseFloat(t.amount || '0'), 0);
+  const categoryTotals: any = {};
+  validTransactions.forEach((t: any) => { categoryTotals[t.category] = (categoryTotals[t.category] || 0) + parseFloat(t.amount || '0'); });
+  const categoryStats = Object.entries(categoryTotals).map(([name, amount]: any) => ({ 
+    name, 
+    amount, 
+    percentage: totalAmount > 0 ? (amount / totalAmount) * 100 : 0, 
+    style: getCategoryStyle(name) 
   })).sort((a, b) => b.amount - a.amount);
 
-  // SVG Donut Chart Constants
-  const size = 200;
-  const strokeWidth = 24;
-  const radius = (size - strokeWidth) / 2;
-  const circumference = 2 * Math.PI * radius;
+  // Donut chart calculations
   let currentOffset = 0;
+  const radius = 85;
+  const circumference = 2 * Math.PI * radius;
 
   return (
     <div className="flex flex-col h-full z-10">
-      <header className="safe-top p-6 flex items-center justify-center shrink-0">
-        <p className="text-xs font-black tracking-[0.3em] text-white/40 uppercase">Spendings Summary</p>
-      </header>
-
+      <header className="safe-top p-6 flex items-center justify-center shrink-0"><p className="text-xs font-black tracking-[0.3em] text-white/40 uppercase">Spendings Summary</p></header>
       <main className="flex-1 overflow-y-auto px-6 py-2">
         <div className="flex flex-col items-center mb-10">
-          <div className="relative w-[200px] h-[200px] mb-8">
-            <svg width={size} height={size} className="transform -rotate-90">
-              {/* Background circle */}
+          
+          {/* Donut Chart */}
+          <div className="relative w-64 h-64 mb-8 flex items-center justify-center">
+            <svg className="w-full h-full transform -rotate-90" viewBox="0 0 200 200">
               <circle
-                cx={size / 2}
-                cy={size / 2}
+                cx="100"
+                cy="100"
                 r={radius}
+                stroke="currentColor"
+                strokeWidth="10"
                 fill="transparent"
-                stroke="rgba(255,255,255,0.05)"
-                strokeWidth={strokeWidth}
+                className="text-white/5"
               />
-              {/* Segments */}
               {categoryStats.map((stat, i) => {
-                const dashArray = (stat.percentage / 100) * circumference;
-                const strokeColor = stat.style.color.replace('text-', ''); // Rough conversion
-                // Map tailwind text colors to actual hex/rgb for SVG
-                const colorMap: Record<string, string> = {
-                  'green-400': '#4ade80',
-                  'yellow-400': '#facc15',
-                  'blue-400': '#60a5fa',
-                  'gray-400': '#9ca3af'
-                };
-                const color = colorMap[strokeColor] || '#9ca3af';
-                
-                const circle = (
+                const strokeDasharray = `${(stat.percentage * circumference) / 100} ${circumference}`;
+                const strokeDashoffset = - (currentOffset * circumference) / 100;
+                currentOffset += stat.percentage;
+                return (
                   <circle
                     key={i}
-                    cx={size / 2}
-                    cy={size / 2}
+                    cx="100"
+                    cy="100"
                     r={radius}
-                    fill="transparent"
-                    stroke={color}
-                    strokeWidth={strokeWidth}
-                    strokeDasharray={`${dashArray} ${circumference}`}
-                    strokeDashoffset={-currentOffset}
+                    stroke={stat.style.hex}
+                    strokeWidth="10"
+                    strokeDasharray={strokeDasharray}
+                    strokeDashoffset={strokeDashoffset}
                     strokeLinecap="round"
+                    fill="transparent"
                     className="transition-all duration-1000 ease-out"
-                    style={{ filter: `drop-shadow(0 0 8px ${color}44)` }}
                   />
                 );
-                currentOffset += dashArray;
-                return circle;
               })}
             </svg>
-            <div className="absolute inset-0 flex flex-col items-center justify-center">
+            <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
               <p className="text-white/40 text-[10px] font-black uppercase tracking-widest">Total Spent</p>
-              <p className="text-2xl font-black text-white neon-text">RM {formatAmount(totalAmount)}</p>
+              <p className="text-3xl font-black text-white neon-text mt-1">RM {formatAmount(totalAmount)}</p>
             </div>
           </div>
 
@@ -664,29 +527,15 @@ function StatsView({ transactions, onBack, formatAmount }: {
               const Icon = stat.style.icon;
               return (
                 <div key={i} className="glass-card p-4 flex items-center justify-between border-white/5">
-                  <div className="flex items-center gap-4">
-                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center bg-white/5 ${stat.style.color}`}>
-                      <Icon size={20} />
-                    </div>
-                    <div>
-                      <p className="font-bold text-white capitalize">{stat.name}</p>
-                      <p className="text-[10px] text-white/40 font-black uppercase tracking-widest">{stat.percentage.toFixed(1)}% Usage</p>
-                    </div>
-                  </div>
-                  <p className="text-lg font-black text-white tracking-tight">RM {formatAmount(stat.amount)}</p>
+                  <div className="flex items-center gap-4"><div className={`w-10 h-10 rounded-xl flex items-center justify-center bg-white/5 ${stat.style.color}`}><Icon size={20} /></div><div><p className="font-bold text-white capitalize">{stat.name}</p><p className="text-[10px] text-white/40 font-black uppercase">{stat.percentage.toFixed(1)}% Usage</p></div></div>
+                  <p className="text-lg font-black text-white">RM {formatAmount(stat.amount)}</p>
                 </div>
               );
             })}
           </div>
         </div>
       </main>
-
-      <footer className="safe-bottom px-6 shrink-0 py-4">
-        <button onClick={onBack} className="w-full h-16 bg-white/10 border border-white/10 text-white rounded-[2rem] font-black text-lg flex items-center justify-center gap-3 active:scale-95 transition-all">
-          <ArrowLeft size={20} /> RETURN TO LOG
-        </button>
-      </footer>
+      <footer className="safe-bottom px-6 shrink-0 py-4"><button onClick={onBack} className="w-full h-16 bg-white/10 border border-white/10 text-white rounded-[2rem] font-black text-lg flex items-center justify-center gap-3"><ArrowLeft size={20} /> RETURN TO LOG</button></footer>
     </div>
   );
 }
-
