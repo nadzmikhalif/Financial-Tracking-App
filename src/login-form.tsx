@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { User, Lock, ArrowRight, Loader2, Check } from 'lucide-react';
-import { supabase } from "@/lib/supabase";
+import { supabase } from "./supabase";
 
 // Vertex shader source code
 const vertexSmokeySource = `
@@ -332,7 +332,8 @@ export function SignUpForm({ onToggle }: { onToggle?: () => void }) {
       email, 
       password,
       options: {
-        data: { full_name: name }
+        data: { full_name: name },
+        redirectTo: window.location.origin
       }
     });
     if (error) setError(error.message);
@@ -456,17 +457,6 @@ export function SignUpForm({ onToggle }: { onToggle?: () => void }) {
  * Matches the design of LoginForm and SignUpForm.
  */
 export function VerifyRedirect({ onFinish }: { onFinish: () => void }) {
-  const [countdown, setCountdown] = useState(3);
-
-  useEffect(() => {
-    if (countdown > 0) {
-      const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
-      return () => clearTimeout(timer);
-    } else {
-      onFinish();
-    }
-  }, [countdown, onFinish]);
-
   return (
     <div className="w-full max-w-sm p-10 space-y-6 bg-white/10 backdrop-blur-lg rounded-2xl border border-white/20 shadow-2xl flex flex-col items-center text-center">
       <div className="w-20 h-20 rounded-full bg-green-500/20 flex items-center justify-center border border-green-500/30 mb-2">
@@ -475,7 +465,10 @@ export function VerifyRedirect({ onFinish }: { onFinish: () => void }) {
       <div className="text-center w-full">
         <h2 className="text-3xl font-bold text-white">Email Verified!</h2>
         <p className="mt-4 text-sm text-gray-300">
-          You have successfully verified your email. You will be redirected to the sign-in page in {countdown} seconds...
+          Your email has been successfully verified.
+        </p>
+        <p className="mt-2 text-sm font-semibold text-blue-400">
+          Return to app to proceed with Login
         </p>
       </div>
       
@@ -483,7 +476,7 @@ export function VerifyRedirect({ onFinish }: { onFinish: () => void }) {
         onClick={onFinish}
         className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 rounded-lg text-white font-semibold focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 focus:ring-blue-500 transition-all duration-300"
       >
-        Sign In Now
+        Go to Login
       </button>
     </div>
   );

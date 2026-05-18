@@ -3,6 +3,11 @@
 // real AI receipt processing via Google Gemini, and data persistence via Supabase.
 
 require('dotenv').config();
+console.log('--- DEBUG ENV ---');
+console.log('SUPABASE_URL:', process.env.SUPABASE_URL);
+console.log('SUPABASE_SERVICE_ROLE_KEY:', process.env.SUPABASE_SERVICE_ROLE_KEY ? 'EXISTS' : 'MISSING');
+console.log('GEMINI_API_KEY:', process.env.GEMINI_API_KEY ? 'EXISTS' : 'MISSING');
+console.log('-----------------');
 const express = require('express');
 const multer = require('multer');
 const path = require('path');
@@ -22,9 +27,23 @@ const supabase = (supabaseUrl && supabaseKey && supabaseUrl !== 'your_supabase_p
   ? createClient(supabaseUrl, supabaseKey) 
   : null;
 
-if (!supabase) {
-  console.log('[ERROR] Supabase credentials missing or default. Application will not function correctly.');
-}
+/**
+ * Middleware to verify Supabase Auth Token
+ */
+const authenticate = async (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return res.status(401).json({ error: 'No authorization header' });
+
+  const token = authHeader.split(' ')[1];
+  const { data: { user }, error } = await supabase.auth.getUser(token);
+
+  if (error || !user) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  req.user = user;
+  next();
+};
 
 // Configure Rate Limiter: Maximum 4 requests per minute
 const aiRateLimiter = rateLimit({
@@ -84,7 +103,6 @@ async function processReceiptWithAI(imagePath) {
     throw new Error("Could not parse Gemini response as JSON");
 
   } catch (error) {
-    console.error('[AI] Gemini API Error:', error);
     return {
       amount: "0.00",
       company: "Processing Failed",
@@ -95,8 +113,8 @@ async function processReceiptWithAI(imagePath) {
   }
 }
 
-// GET API: Retrieve all transactions from Supabase
-app.get('/api/transactions', async (req, res) => {
+// GET API: Retrieve user-specific transactions from Supabase
+app.get('/api/transactions', authenticate, async (req, res) => {
   if (!supabase) {
     return res.status(503).json({ error: 'Supabase connection is not configured.' });
   }
@@ -104,49 +122,152 @@ app.get('/api/transactions', async (req, res) => {
   const { data, error } = await supabase
     .from('transactions')
     .select('*')
+    .eq('user_id', req.user.id)
     .order('id', { ascending: false });
   
   if (error) {
-    console.error('[Supabase] Fetch error:', error);
     return res.status(500).json({ error: 'Failed to fetch transactions from Supabase.' });
   }
 
   res.json(data);
 });
 
-// DELETE API: Remove a transaction by ID
-app.delete('/api/transactions/:id', async (req, res) => {
+// --- Profile & Categories APIs ---
+
+// GET API: Get user profile
+app.get('/api/profile', authenticate, async (req, res) => {
+  if (!supabase) return res.status(503).json({ error: 'Supabase connection not configured' });
+  
+  let { data, error } = await supabase.from('profiles').select('*').eq('id', req.user.id).single();
+  
+  if (error && error.code === 'PGRST116') {
+    // Not found, create it
+    const { data: newProfile, error: createError } = await supabase
+      .from('profiles')
+      .insert([{ id: req.user.id }])
+      .select()
+      .single();
+    if (createError) return res.status(500).json({ error: 'Failed to create profile' });
+    data = newProfile;
+  } else if (error) {
+    return res.status(500).json({ error: 'Failed to fetch profile' });
+  }
+
+  res.json(data);
+});
+
+// PATCH API: Update user profile (wallpaper)
+app.patch('/api/profile', authenticate, async (req, res) => {
+  if (!supabase) return res.status(503).json({ error: 'Supabase connection not configured' });
+  
+  const { wallpaper_color } = req.body;
+  const { data, error } = await supabase
+    .from('profiles')
+    .update({ wallpaper_color, updated_at: new Date() })
+    .eq('id', req.user.id)
+    .select()
+    .single();
+
+  if (error) return res.status(500).json({ error: 'Failed to update profile' });
+  res.json(data);
+});
+
+// GET API: Get user categories
+app.get('/api/categories', authenticate, async (req, res) => {
+  if (!supabase) return res.status(503).json({ error: 'Supabase connection not configured' });
+  
+  const { data, error } = await supabase
+    .from('categories')
+    .select('*')
+    .eq('user_id', req.user.id)
+    .order('name', { ascending: true });
+
+  if (error) return res.status(500).json({ error: 'Failed to fetch categories' });
+  res.json(data);
+});
+
+// POST API: Add a new category
+app.post('/api/categories', authenticate, async (req, res) => {
+  if (!supabase) return res.status(503).json({ error: 'Supabase connection not configured' });
+  
+  const { name, color, icon } = req.body;
+  const { data, error } = await supabase
+    .from('categories')
+    .insert([{ user_id: req.user.id, name, color, icon }])
+    .select()
+    .single();
+
+  if (error) return res.status(500).json({ error: 'Failed to add category' });
+  res.json(data);
+});
+
+// PATCH API: Update a category
+app.patch('/api/categories/:id', authenticate, async (req, res) => {
+  if (!supabase) return res.status(503).json({ error: 'Supabase connection not configured' });
+  
+  const { name, color, icon } = req.body;
+  const { data, error } = await supabase
+    .from('categories')
+    .update({ name, color, icon })
+    .eq('id', req.params.id)
+    .eq('user_id', req.user.id)
+    .select()
+    .single();
+
+  if (error) return res.status(500).json({ error: 'Failed to update category' });
+  res.json(data);
+});
+
+// DELETE API: Remove a category
+app.delete('/api/categories/:id', authenticate, async (req, res) => {
+  if (!supabase) return res.status(503).json({ error: 'Supabase connection not configured' });
+  
+  const { error } = await supabase
+    .from('categories')
+    .delete()
+    .eq('id', req.params.id)
+    .eq('user_id', req.user.id);
+
+  if (error) return res.status(500).json({ error: 'Failed to delete category' });
+  res.sendStatus(204);
+});
+
+// DELETE API: Remove a transaction by ID (must belong to user)
+app.delete('/api/transactions/:id', authenticate, async (req, res) => {
   if (!supabase) {
     return res.status(503).json({ error: 'Supabase connection is not configured.' });
   }
 
   const id = parseInt(req.params.id);
 
-  // 1. Get filename to delete from storage
-  const { data: record, error: fetchError } = await supabase.from('transactions').select('filename').eq('id', id).single();
-  if (fetchError) {
-    console.error('[Supabase] Record not found:', fetchError);
-    return res.status(404).json({ error: 'Transaction not found in database.' });
+  const { data: record, error: fetchError } = await supabase
+    .from('transactions')
+    .select('filename, user_id')
+    .eq('id', id)
+    .single();
+
+  if (fetchError || !record) {
+    return res.status(404).json({ error: 'Transaction not found.' });
+  }
+
+  if (record.user_id !== req.user.id) {
+    return res.status(403).json({ error: 'Forbidden' });
   }
   
-  // 2. Delete from DB
   const { error: dbError } = await supabase.from('transactions').delete().eq('id', id);
   if (dbError) {
-    console.error('[Supabase] Delete error:', dbError);
-    return res.status(500).json({ error: 'Failed to delete record from database.' });
+    return res.status(500).json({ error: 'Failed to delete record.' });
   }
   
-  // 3. Delete from Storage
   if (record?.filename) {
     await supabase.storage.from('receipts').remove([record.filename]);
   }
 
-  console.log(`[Supabase] Deleted transaction: ${id}`);
   res.sendStatus(204);
 });
 
 // POST API: Upload image, COMPRESS IT, and trigger AI processing
-app.post('/api/upload', aiRateLimiter, upload.single('image'), async (req, res) => {
+app.post('/api/upload', authenticate, aiRateLimiter, upload.single('image'), async (req, res) => {
   if (!supabase) {
     return res.status(503).json({ error: 'Supabase connection is not configured.' });
   }
@@ -154,7 +275,7 @@ app.post('/api/upload', aiRateLimiter, upload.single('image'), async (req, res) 
   if (!req.file) return res.status(400).send('No image file uploaded.');
 
   const tempPath = req.file.path;
-  const finalFilename = req.file.filename.replace('TEMP_', '');
+  const finalFilename = `${Date.now()}.jpg`;
   const finalPath = path.join('uploads', finalFilename);
 
   try {
@@ -169,17 +290,21 @@ app.post('/api/upload', aiRateLimiter, upload.single('image'), async (req, res) 
     // 2. AI Vision Processing
     const aiData = await processReceiptWithAI(finalPath);
     if (aiData.aiError) {
-       fs.unlinkSync(finalPath); // Cleanup compressed file on AI failure
+       if (fs.existsSync(finalPath)) fs.unlinkSync(finalPath);
        return res.status(422).json(aiData);
     }
 
-    // 3. Create the record
-    const newTransaction = {
-      id: Date.now(),
+    // 3. Prepare data for Supabase
+    // We do NOT include 'id' so Supabase can generate it automatically
+    const newRecord = {
+      user_id: req.user.id,
+      company: aiData.company || "Unknown",
+      amount: parseFloat(aiData.amount) || 0,
+      date: aiData.date || new Date().toISOString().split('T')[0],
+      time: aiData.time || "00:00",
+      category: aiData.category || "Others",
       filename: finalFilename,
-      timestamp: new Date().toISOString(),
-      status: 'Success',
-      ...aiData
+      status: 'Success'
     };
 
     // 4. Upload to Supabase Storage
@@ -192,9 +317,8 @@ app.post('/api/upload', aiRateLimiter, upload.single('image'), async (req, res) 
       });
 
     if (storageError) {
-      fs.unlinkSync(finalPath);
-      console.error('[Supabase] Storage Upload Error:', storageError);
-      return res.status(500).json({ error: 'Failed to upload image to Supabase Storage.' });
+      if (fs.existsSync(finalPath)) fs.unlinkSync(finalPath);
+      return res.status(500).json({ error: 'Storage Upload Error', details: storageError });
     }
 
     // 5. Get Public URL
@@ -202,27 +326,27 @@ app.post('/api/upload', aiRateLimiter, upload.single('image'), async (req, res) 
       .from('receipts')
       .getPublicUrl(finalFilename);
     
-    newTransaction.image_url = publicUrl;
+    newRecord.image_url = publicUrl;
 
     // 6. Insert into Database
-    const { error: dbError } = await supabase
+    const { data: insertedData, error: dbError } = await supabase
       .from('transactions')
-      .insert([newTransaction]);
+      .insert([newRecord])
+      .select();
     
     if (dbError) {
        // Rollback storage if DB fails
        await supabase.storage.from('receipts').remove([finalFilename]);
-       fs.unlinkSync(finalPath);
-       console.error('[Supabase] DB Insert Error:', dbError);
-       return res.status(500).json({ error: 'Failed to save transaction data to Supabase.' });
+       if (fs.existsSync(finalPath)) fs.unlinkSync(finalPath);
+       return res.status(500).json({ error: 'Database Insert Error', details: dbError });
     }
 
-    // Cleanup local compressed file after successful upload
-    fs.unlinkSync(finalPath);
-    res.json(newTransaction);
+    // Cleanup local file
+    if (fs.existsSync(finalPath)) fs.unlinkSync(finalPath);
+    
+    res.json(insertedData[0]);
 
   } catch (error) {
-    console.error('Critical Processing Error:', error);
     if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
     if (fs.existsSync(finalPath)) fs.unlinkSync(finalPath);
     res.status(500).json({ error: 'Internal Server Error' });
@@ -235,6 +359,6 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
-app.listen(3000, () => {
-  console.log('Neural Server Online: http://localhost:3000');
+app.listen(3000, '0.0.0.0', () => {
+  console.log('Neural Server Online');
 });

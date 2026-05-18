@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "A 3-page React app for image capture and transaction viewing",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "server": "node server.js",
