@@ -359,6 +359,7 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
-app.listen(3000, '0.0.0.0', () => {
-  console.log('Neural Server Online');
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Neural Server Online on port ${PORT}`);
 });
