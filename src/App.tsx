@@ -55,7 +55,7 @@ const getCategoryStyle = (category: string, categories: Category[] = []) => {
     return { 
       color: `text-[${dynamicCat.color}]`, 
       hex: dynamicCat.color, 
-      bg: `opacity-20`, // We'll use inline styles for better control
+      bg: ``, // We'll use inline styles for better control
       icon: Icon, 
       size: 24,
       isDynamic: true
@@ -502,7 +502,7 @@ function CaptureView({ onBack, onSuccess, session }: any) {
                   <p className="text-sm font-bold text-white uppercase tracking-widest">Gallery</p>
                 </div>
                 <div className="w-20 h-20 rounded-full bg-white/5 flex items-center justify-center border border-white/10 group-active:scale-95 transition-all">
-                  <Upload size={32} className="text-neon-blue/60" />
+                  <Upload size={32} className="text-neon-blue" />
                 </div>
               </button>
             </div>
@@ -698,7 +698,7 @@ function StatsView({ transactions, categories, onBack, formatAmount }: any) {
               );
             }) : (
               <div className="glass-card p-8 flex flex-col items-center justify-center border-white/5 opacity-50">
-                <Calendar size={32} className="text-white/20 mb-3" />
+                <Calendar size={32} className="text-white mb-3" />
                 <p className="text-xs font-bold uppercase tracking-widest text-white/40">No records found</p>
               </div>
             )}
@@ -800,7 +800,7 @@ function SettingsView({ profile, categories, onBack, onLogout, onUpdateProfile, 
                     </div>
                     <p className="font-bold text-white">{cat.name}</p>
                   </div>
-                  <button onClick={() => handleDeleteCategory(cat.id)} className="p-2 text-white/20 hover:text-red-400 transition-colors"><Trash size={18} /></button>
+                  <button onClick={() => handleDeleteCategory(cat.id)} className="p-2 text-white hover:text-red-400 transition-colors"><Trash size={18} /></button>
                 </div>
               );
             })}
