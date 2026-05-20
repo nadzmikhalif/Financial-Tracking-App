@@ -4,7 +4,7 @@
   "description": "A 3-page React app for image capture and transaction viewing",
   "scripts": {
     "dev": "npx vite --host",
-    "build": "tsc && npx vite build",
+    "build": "npx tsc && npx vite build",
     "preview": "npx vite preview",
     "server": "node server.js",
     "start": "npm run build && npm run server"
