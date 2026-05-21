@@ -38,7 +38,7 @@ interface Profile {
   wallpaper_color: string;
 }
 
-type ViewState = 'HOME' | 'CAPTURE' | 'SUCCESS' | 'STATS' | 'SETTINGS';
+type ViewState = 'HOME' | 'CAPTURE' | 'SUCCESS' | 'STATS' | 'SETTINGS' | 'FAIL';
 
 const CATEGORY_ICON_SIZE = 24;
 
@@ -279,6 +279,7 @@ export default function App() {
             onStats={() => setView('STATS')} 
             onSettings={() => setView('SETTINGS')}
             formatAmount={formatAmount} 
+            session={session}
           />
         </div>
       )}
@@ -310,12 +311,17 @@ export default function App() {
             setCurrentTransaction(data);
             setView('SUCCESS');
           }} 
+          onFail={() => setView('FAIL')}
           session={session}
         />
       )}
 
       {view === 'SUCCESS' && (
         <SuccessView transaction={currentTransaction} categories={categories} onDone={() => setView('HOME')} formatAmount={formatAmount} />
+      )}
+
+      {view === 'FAIL' && (
+        <FailView onRetry={() => setView('CAPTURE')} onBack={() => setView('HOME')} />
       )}
 
       {focusedTransaction && (() => {
@@ -368,18 +374,19 @@ export default function App() {
   );
 }
 
-function HomeView({ transactions, categories, loading, onNew, onFocus, onStats, onSettings, formatAmount }: any) {
+function HomeView({ transactions, categories, loading, onNew, onFocus, onStats, onSettings, formatAmount, session }: any) {
+  const userName = session?.user?.user_metadata?.full_name || session?.user?.email?.split('@')[0] || 'User';
   return (
     <div className="flex flex-col h-full z-10">
-      <header className="safe-top px-6 py-6 shrink-0">
+      <header className="safe-top px-6 pt-[74px] pb-6 shrink-0">
         <div className="flex justify-between items-end">
           <div>
-            <p className="text-neon-blue text-xs font-bold tracking-[0.2em] uppercase mb-1">Jarvis 2.0</p>
-            <h1 className="text-3xl font-black tracking-tight">Activity</h1>
+            <p className="text-neon-blue text-xs font-bold tracking-[0.2em] uppercase mb-1 translate-y-[15px]">Hello {userName},</p>
+            <h1 className="text-4xl font-black tracking-tight translate-y-[13px]">Activity</h1>
           </div>
           <div className="flex gap-2">
-            <button onClick={onStats} className="p-3 glass-card rounded-2xl active:scale-95 transition-all border-white/10"><FileText className="text-neon-blue" size={20} /></button>
-            <button onClick={onSettings} className="p-3 glass-card rounded-2xl active:scale-95 transition-all border-white/10"><Settings className="text-gray-400" size={20} /></button>
+            <button onClick={onStats} className="p-3 glass-card rounded-2xl active:scale-95 transition-all border-white/10 translate-y-[15px]"><FileText className="text-neon-blue" size={20} /></button>
+            <button onClick={onSettings} className="p-3 glass-card rounded-2xl active:scale-95 transition-all border-white/10 translate-y-[15px]"><Settings className="text-gray-400" size={20} /></button>
           </div>
         </div>
       </header>
@@ -428,7 +435,7 @@ function HomeView({ transactions, categories, loading, onNew, onFocus, onStats, 
   ); 
 }
 
-function CaptureView({ onBack, onSuccess, session }: any) {
+function CaptureView({ onBack, onSuccess, onFail, session }: any) {
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -456,11 +463,15 @@ function CaptureView({ onBack, onSuccess, session }: any) {
         body: formData,
         headers: { 'Authorization': `Bearer ${session?.access_token}` }
       });
+      const data = await response.json();
       if (response.ok) {
-        onSuccess(await response.json());
+        onSuccess(data);
       } else {
-        const errData = await response.json();
-        alert(errData.aiError || errData.error || 'Processing Failed');
+        if (data.is_receipt === false) {
+          onFail();
+        } else {
+          alert(data.aiError || data.error || 'Processing Failed');
+        }
       }
     } catch (err) { alert('Network Error'); } 
     finally { setIsProcessing(false); }
@@ -746,6 +757,9 @@ function SettingsView({ profile, categories, onBack, onLogout, onUpdateProfile, 
     if (res.ok) {
       setNewCatName("");
       onUpdateCategories();
+    } else {
+      const data = await res.json();
+      alert(data.error || 'Failed to add category');
     }
     setIsAdding(false);
   };
@@ -871,6 +885,31 @@ function SettingsView({ profile, categories, onBack, onLogout, onUpdateProfile, 
           </button>
         </section>
       </main>
+    </div>
+  );
+}
+
+function FailView({ onRetry, onBack }: any) {
+  return (
+    <div className="flex flex-col h-full z-10">
+      <main className="flex-1 px-8 flex flex-col items-center justify-center text-center">
+        <div className="w-24 h-24 rounded-full flex items-center justify-center mb-8 border border-red-500/30 bg-red-500/10"><AlertCircle size={48} className="text-red-400" /></div>
+        <h1 className="text-3xl font-black mb-4 text-white">Invalid Receipt</h1>
+        <p className="text-white/60 mb-8 leading-relaxed">The image you uploaded does not appear to be a valid receipt, bill, or invoice. Please try again with a clearer photo of a physical receipt.</p>
+        
+        <div className="w-full glass-card p-6 border-white/10 text-left space-y-3">
+          <p className="text-[10px] font-black uppercase text-white/30 tracking-widest">Tips for better scans:</p>
+          <ul className="text-sm text-white/80 space-y-2">
+            <li className="flex gap-2"><span>•</span> Ensure good lighting</li>
+            <li className="flex gap-2"><span>•</span> Lay receipt on a flat surface</li>
+            <li className="flex gap-2"><span>•</span> Capture the entire document</li>
+          </ul>
+        </div>
+      </main>
+      <footer className="safe-bottom px-6 shrink-0 py-4 space-y-3">
+        <button onClick={onRetry} className="w-full h-16 bg-white text-black rounded-[2rem] font-black text-lg flex items-center justify-center gap-3 active:scale-95 transition-all">TRY AGAIN</button>
+        <button onClick={onBack} className="w-full h-16 bg-white/5 border border-white/10 text-white rounded-[2rem] font-black text-lg flex items-center justify-center gap-3 active:scale-95 transition-all">BACK TO ACTIVITY</button>
+      </footer>
     </div>
   );
 }

@@ -89,7 +89,7 @@ async function processReceiptWithAI(imagePath) {
       },
     };
 
-    const prompt = "Analyze this receipt and extract the following into a JSON object: amount (number), company (string), date (YYYY-MM-DD), time (HH:mm, 24-hour format), and category (Food, Transportation, Computer, or Others). Return ONLY the JSON.";
+    const prompt = "Analyze this image. First, determine if it is a receipt, bill or an invoice. If it is NOT a receipt, bill or invoice, return a JSON object with { \"is_receipt\": false }. If it IS a receipt, bill or invoice, extract the following into a JSON object: amount (number), company (string), date (YYYY-MM-DD), time (HH:mm, 24-hour format), category (Food, Transportation, Computer, or Others), and set \"is_receipt\": true. Return ONLY the JSON.";
 
     const result = await model.generateContent([prompt, imagePart]);
     const response = await result.response;
@@ -97,7 +97,8 @@ async function processReceiptWithAI(imagePath) {
     
     const jsonMatch = responseText.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
+      const parsed = JSON.parse(jsonMatch[0]);
+      return parsed;
     }
     
     throw new Error("Could not parse Gemini response as JSON");
@@ -191,6 +192,19 @@ app.post('/api/categories', authenticate, async (req, res) => {
   if (!supabase) return res.status(503).json({ error: 'Supabase connection not configured' });
   
   const { name, color, icon } = req.body;
+
+  // Check if the combination already exists
+  const { data: existing, error: checkError } = await supabase
+    .from('categories')
+    .select('id')
+    .eq('user_id', req.user.id)
+    .eq('color', color)
+    .eq('icon', icon)
+    .maybeSingle();
+
+  if (checkError) return res.status(500).json({ error: 'Database check failed' });
+  if (existing) return res.status(400).json({ error: 'This icon and color combination is already in use for another category.' });
+
   const { data, error } = await supabase
     .from('categories')
     .insert([{ user_id: req.user.id, name, color, icon }])
@@ -289,6 +303,16 @@ app.post('/api/upload', authenticate, aiRateLimiter, upload.single('image'), asy
 
     // 2. AI Vision Processing
     const aiData = await processReceiptWithAI(finalPath);
+
+    // Check if it is a receipt
+    if (aiData.is_receipt === false) {
+       if (fs.existsSync(finalPath)) fs.unlinkSync(finalPath);
+       return res.status(400).json({ 
+         error: 'This image does not appear to be a valid receipt.', 
+         is_receipt: false 
+       });
+    }
+
     if (aiData.aiError) {
        if (fs.existsSync(finalPath)) fs.unlinkSync(finalPath);
        return res.status(422).json(aiData);
