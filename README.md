@@ -1,6 +1,6 @@
 # 🧠 Neural Finance Tracker
 
-A modern, "Neural-Space" styled financial application designed for effortless expense logging. This app combines high-performance image processing with Google's Gemini AI to automatically extract data from receipts, alongside a streamlined manual entry system.
+A modern, "Neural-Space" styled financial application designed for effortless expense logging.
 
 ## ✨ Key Features
 
