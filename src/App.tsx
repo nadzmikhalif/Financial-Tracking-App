@@ -38,7 +38,7 @@ interface Profile {
   wallpaper_color: string;
 }
 
-type ViewState = 'HOME' | 'CAPTURE' | 'SUCCESS' | 'STATS' | 'SETTINGS' | 'FAIL';
+type ViewState = 'HOME' | 'CAPTURE' | 'SUCCESS' | 'STATS' | 'SETTINGS' | 'FAIL' | 'MANUAL';
 
 const CATEGORY_ICON_SIZE = 24;
 
@@ -312,6 +312,19 @@ export default function App() {
             setView('SUCCESS');
           }} 
           onFail={() => setView('FAIL')}
+          onManual={() => setView('MANUAL')}
+          session={session}
+        />
+      )}
+
+      {view === 'MANUAL' && (
+        <ManualView 
+          onBack={() => setView('CAPTURE')} 
+          onSuccess={(data: any) => {
+            setCurrentTransaction(data);
+            setView('SUCCESS');
+          }}
+          categories={categories}
           session={session}
         />
       )}
@@ -435,7 +448,7 @@ function HomeView({ transactions, categories, loading, onNew, onFocus, onStats, 
   ); 
 }
 
-function CaptureView({ onBack, onSuccess, onFail, session }: any) {
+function CaptureView({ onBack, onSuccess, onFail, onManual, session }: any) {
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -496,24 +509,35 @@ function CaptureView({ onBack, onSuccess, onFail, session }: any) {
               <button onClick={() => { setSelectedImage(null); setPreviewUrl(null); }} className="absolute top-4 right-4 p-3 bg-black/50 backdrop-blur-xl rounded-2xl border border-white/10"><X size={20} /></button>
             </div>
           ) : (
-            <div className="w-full h-full flex flex-col items-center justify-center gap-8">
-              <button onClick={() => fileInputRef.current?.click()} className="flex flex-col items-center gap-3 group">
+            <div className="w-full h-full flex flex-col items-center justify-center gap-6">
+              <button onClick={() => fileInputRef.current?.click()} className="flex flex-col items-center gap-2 group">
                 <div className="text-center">
-                  <p className="text-sm font-bold text-white uppercase tracking-widest">Camera</p>
+                  <p className="text-[10px] font-bold text-white uppercase tracking-widest opacity-40 group-hover:opacity-100 transition-opacity">Camera</p>
                 </div>
-                <div className="w-20 h-20 rounded-full bg-white/5 flex items-center justify-center border border-white/10 group-active:scale-95 transition-all">
-                  <Camera size={32} className="text-neon-blue" />
+                <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center border border-white/10 group-active:scale-95 transition-all">
+                  <Camera size={28} className="text-neon-blue" />
                 </div>
               </button>
 
-              <div className="w-32 h-px bg-white/5"></div>
+              <div className="w-24 h-px bg-white/5"></div>
 
-              <button onClick={() => galleryInputRef.current?.click()} className="flex flex-col items-center gap-3 group">
+              <button onClick={() => galleryInputRef.current?.click()} className="flex flex-col items-center gap-2 group">
                 <div className="text-center">
-                  <p className="text-sm font-bold text-white uppercase tracking-widest">Gallery</p>
+                  <p className="text-[10px] font-bold text-white uppercase tracking-widest opacity-40 group-hover:opacity-100 transition-opacity">Gallery</p>
                 </div>
-                <div className="w-20 h-20 rounded-full bg-white/5 flex items-center justify-center border border-white/10 group-active:scale-95 transition-all">
-                  <Upload size={32} className="text-neon-blue" />
+                <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center border border-white/10 group-active:scale-95 transition-all">
+                  <Upload size={28} className="text-neon-blue" />
+                </div>
+              </button>
+
+              <div className="w-24 h-px bg-white/5"></div>
+
+              <button onClick={onManual} className="flex flex-col items-center gap-2 group">
+                <div className="text-center">
+                  <p className="text-[10px] font-bold text-white uppercase tracking-widest opacity-40 group-hover:opacity-100 transition-opacity">Manual</p>
+                </div>
+                <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center border border-white/10 group-active:scale-95 transition-all">
+                  <Plus size={28} className="text-neon-blue" />
                 </div>
               </button>
             </div>
@@ -579,6 +603,197 @@ function SuccessView({ transaction, categories, onDone, formatAmount }: any) {
   );
 }
 
+function ManualView({ onBack, onSuccess, categories, session }: any) {
+  const [company, setCompany] = useState("");
+  const [amount, setAmount] = useState("");
+  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [time, setTime] = useState(new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }));
+  const [category, setCategory] = useState("");
+  const [selectedImage, setSelectedImage] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Set initial category from user categories if available
+  useEffect(() => {
+    if (categories && categories.length > 0 && !category) {
+      setCategory(categories[0].name);
+    } else if (!category) {
+      setCategory("Others");
+    }
+  }, [categories]);
+
+  const handleFileChange = (e: any) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setSelectedImage(file);
+      const reader = new FileReader();
+      reader.onloadend = () => setPreviewUrl(reader.result as string);
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!company || !amount || !date || !time || !category) return;
+    setIsSubmitting(true);
+    
+    const formData = new FormData();
+    formData.append('company', company);
+    formData.append('amount', amount);
+    formData.append('date', date);
+    formData.append('time', time);
+    formData.append('category', category);
+    if (selectedImage) {
+      formData.append('image', selectedImage);
+    }
+
+    try {
+      const response = await fetch('/api/transactions/manual', {
+        method: 'POST',
+        headers: { 
+          'Authorization': `Bearer ${session?.access_token}`
+          // Note: Do not set Content-Type header when sending FormData
+        },
+        body: formData
+      });
+      const data = await response.json();
+      if (response.ok) {
+        onSuccess(data);
+      } else {
+        alert(data.error || 'Failed to add transaction');
+      }
+    } catch (err) { alert('Network Error'); }
+    finally { setIsSubmitting(false); }
+  };
+
+  return (
+    <div className="flex flex-col h-full z-10">
+      <header className="safe-top p-6 flex items-center justify-between shrink-0">
+        <button onClick={onBack} className="p-3 glass-card !rounded-2xl border-white/5 translate-y-[15px]"><ArrowLeft size={20} /></button>
+        <p className="text-s font-black tracking-[0.3em] text-white/40 uppercase translate-y-[15px]">Manual Entry</p>
+        <div className="w-12"></div>
+      </header>
+
+      <main className="flex-1 overflow-y-auto px-6 py-2">
+        <form onSubmit={handleSubmit} className="space-y-5 pb-10">
+          <div className="space-y-3">
+            <div className="glass-card py-2.5 px-4 border-white/5 space-y-1">
+              <label className="text-[10px] font-black uppercase text-white/30 tracking-widest">Company / Vendor</label>
+              <input 
+                type="text" 
+                value={company} 
+                onChange={(e) => setCompany(e.target.value)}
+                placeholder="Where did you spend?"
+                required
+                className="w-full bg-transparent text-white font-bold outline-none placeholder:text-white/20"
+              />
+            </div>
+
+            <div className="glass-card py-2.5 px-4 border-white/5 space-y-0.5">
+              <label className="text-[10px] font-black uppercase text-white/30 tracking-widest">Amount (RM)</label>
+              <input 
+                type="number" 
+                step="0.01"
+                value={amount} 
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="0.00"
+                required
+                className="w-full bg-transparent text-white text-3xl font-black outline-none placeholder:text-white/10"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="glass-card py-2.5 px-4 border-white/5 space-y-1">
+                <label className="text-[10px] font-black uppercase text-white/30 tracking-widest">Date</label>
+                <input 
+                  type="date" 
+                  value={date} 
+                  onChange={(e) => setDate(e.target.value)}
+                  required
+                  className="w-full bg-transparent text-white font-bold outline-none [color-scheme:dark]"
+                />
+              </div>
+              <div className="glass-card py-2.5 px-4 border-white/5 space-y-1">
+                <label className="text-[10px] font-black uppercase text-white/30 tracking-widest">Time</label>
+                <input 
+                  type="time" 
+                  value={time} 
+                  onChange={(e) => setTime(e.target.value)}
+                  required
+                  className="w-full bg-transparent text-white font-bold outline-none [color-scheme:dark]"
+                />
+              </div>
+            </div>
+
+            <div className="glass-card py-2.5 px-4 border-white/5 space-y-1 relative">
+              <label className="text-[10px] font-black uppercase text-white/30 tracking-widest">Category</label>
+              <select 
+                value={category} 
+                onChange={(e) => setCategory(e.target.value)}
+                className="w-full bg-transparent text-white font-bold outline-none appearance-none"
+              >
+                {categories.length > 0 ? (
+                  categories.map((cat: any) => (
+                    <option key={cat.id} value={cat.name} className="bg-[#0a0a0a]">{cat.name}</option>
+                  ))
+                ) : (
+                  <>
+                    <option value="Food" className="bg-[#0a0a0a]">Food</option>
+                    <option value="Transportation" className="bg-[#0a0a0a]">Transportation</option>
+                    <option value="Computer" className="bg-[#0a0a0a]">Computer</option>
+                    <option value="Others" className="bg-[#0a0a0a]">Others</option>
+                  </>
+                )}
+              </select>
+              <div className="absolute right-4 bottom-3 pointer-events-none text-white/40">
+                <ChevronDown size={18} />
+              </div>
+            </div>
+
+            {/* Image Upload Section (Optional) - Now at bottom and more compact */}
+            <div className="glass-card py-2.5 px-4 border-white/5 space-y-2">
+              <label className="text-[10px] font-black uppercase text-white/30 tracking-widest block">Receipt Image (Optional)</label>
+              <div 
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full h-20 rounded-2xl border-2 border-dashed border-white/10 flex flex-col items-center justify-center cursor-pointer hover:bg-white/5 transition-all overflow-hidden relative"
+              >
+                {previewUrl ? (
+                  <img src={previewUrl} className="w-full h-full object-cover" />
+                ) : (
+                  <div className="flex items-center gap-3">
+                    <Camera size={20} className="text-white/20" />
+                    <p className="text-[10px] font-bold text-white/40 uppercase tracking-widest">Tap to add photo</p>
+                  </div>
+                )}
+                {previewUrl && (
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); setSelectedImage(null); setPreviewUrl(null); }}
+                    className="absolute top-1 right-1 p-1.5 bg-black/60 rounded-xl border border-white/10"
+                  >
+                    <X size={14} className="text-white" />
+                  </button>
+                )}
+              </div>
+              <input type="file" accept="image/*" ref={fileInputRef} onChange={handleFileChange} className="hidden" />
+            </div>
+          </div>
+        </form>
+      </main>
+
+      <footer className="safe-bottom px-6 shrink-0 py-4">
+        <button 
+          onClick={handleSubmit} 
+          disabled={isSubmitting || !company || !amount} 
+          className="w-full h-16 bg-white text-black rounded-[2rem] font-black text-lg flex items-center justify-center gap-3 shadow-[0_0_30px_rgba(255,255,255,0.2)] disabled:opacity-50 active:scale-95 transition-all"
+        >
+          {isSubmitting ? <div className="w-6 h-6 border-4 border-black/20 border-t-black rounded-full animate-spin"></div> : <><Save size={24} /> SAVE TRANSACTION</>}
+        </button>
+      </footer>
+    </div>
+  );
+}
+
 function StatsView({ transactions, categories, onBack, formatAmount }: any) {
   const [selectedMonth, setSelectedMonth] = useState<number | 'ALL'>(new Date().getMonth());
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
@@ -613,13 +828,13 @@ function StatsView({ transactions, categories, onBack, formatAmount }: any) {
 
   return (
     <div className="flex flex-col h-full z-10">
-      <header className="safe-top p-6 flex items-center justify-center shrink-0"><p className="text-xs font-black tracking-[0.3em] text-white/40 uppercase">Spendings Summary</p></header>
+      <header className="safe-top p-6 flex items-center justify-center shrink-0"><p className="text-s font-black tracking-[0.3em] text-white/40 uppercase translate-y-[25px]">Spendings Summary</p></header>
       <main className="flex-1 overflow-y-auto px-6 py-2">
         <div className="flex flex-col items-center mb-10">
           
           {/* Month/Year Filter */}
           <div className="w-full flex gap-3 mb-8">
-            <div className="flex-1 glass-card p-1 border-white/5 relative">
+            <div className="flex-1 glass-card p-1 border-white/5 relative translate-y-[12px]">
               <select 
                 value={selectedMonth} 
                 onChange={(e) => {
@@ -637,7 +852,7 @@ function StatsView({ transactions, categories, onBack, formatAmount }: any) {
                 <ChevronDown size={16} />
               </div>
             </div>
-            <div className="w-28 glass-card p-1 border-white/5">
+            <div className="w-28 glass-card p-1 border-white/5 translate-y-[12px]">
               <input 
                 type="number" 
                 value={selectedYear} 
@@ -649,7 +864,7 @@ function StatsView({ transactions, categories, onBack, formatAmount }: any) {
           </div>
 
           {/* Donut Chart */}
-          <div className="relative w-64 h-64 mb-8 flex items-center justify-center">
+          <div className="relative w-64 h-64 mb-8 flex items-center justify-center translate-y-[10px]">
             <svg className="w-full h-full transform -rotate-90" viewBox="0 0 200 200">
               <circle
                 cx="100"
@@ -777,8 +992,8 @@ function SettingsView({ profile, categories, onBack, onLogout, onUpdateProfile, 
   return (
     <div className="flex flex-col h-full z-10">
       <header className="safe-top p-6 flex items-center justify-between shrink-0">
-        <button onClick={onBack} className="p-3 glass-card !rounded-2xl border-white/5"><ArrowLeft size={20} /></button>
-        <p className="text-xs font-black tracking-[0.3em] text-white/40 uppercase">Settings</p>
+        <button onClick={onBack} className="p-3 glass-card !rounded-2xl border-white/5 translate-y-[15px]"><ArrowLeft size={20} /></button>
+        <p className="text-s font-black tracking-[0.3em] text-white/40 uppercase translate-y-[15px]">Settings</p>
         <div className="w-12"></div>
       </header>
       <main className="flex-1 overflow-y-auto px-6 py-2 space-y-10">

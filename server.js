@@ -280,6 +280,94 @@ app.delete('/api/transactions/:id', authenticate, async (req, res) => {
   res.sendStatus(204);
 });
 
+// POST API: Manual transaction entry (with optional image)
+app.post('/api/transactions/manual', authenticate, upload.single('image'), async (req, res) => {
+  if (!supabase) {
+    return res.status(503).json({ error: 'Supabase connection is not configured.' });
+  }
+
+  const { company, amount, date, time, category } = req.body;
+
+  if (!company || !amount || !date || !time || !category) {
+    return res.status(400).json({ error: 'All fields are required for manual entry.' });
+  }
+
+  let finalFilename = null;
+  let publicUrl = null;
+
+  try {
+    // 1. If an image was uploaded, process and upload it
+    if (req.file) {
+      const tempPath = req.file.path;
+      finalFilename = `${Date.now()}_manual.jpg`;
+      const finalPath = path.join('uploads', finalFilename);
+
+      // Compress Image
+      await sharp(tempPath)
+        .resize(1200, 1200, { fit: 'inside', withoutEnlargement: true })
+        .jpeg({ quality: 70 })
+        .toFile(finalPath);
+
+      fs.unlinkSync(tempPath);
+
+      // Upload to Supabase Storage
+      const fileBuffer = fs.readFileSync(finalPath);
+      const { error: storageError } = await supabase.storage
+        .from('receipts')
+        .upload(finalFilename, fileBuffer, {
+           contentType: 'image/jpeg',
+           upsert: true
+        });
+
+      if (storageError) {
+        if (fs.existsSync(finalPath)) fs.unlinkSync(finalPath);
+        throw storageError;
+      }
+
+      // Get Public URL
+      const { data: { publicUrl: url } } = supabase.storage
+        .from('receipts')
+        .getPublicUrl(finalFilename);
+      
+      publicUrl = url;
+      if (fs.existsSync(finalPath)) fs.unlinkSync(finalPath);
+    }
+
+    // 2. Prepare data for Supabase
+    const newRecord = {
+      user_id: req.user.id,
+      company,
+      amount: parseFloat(amount) || 0,
+      date,
+      time,
+      category,
+      status: 'Success',
+      filename: finalFilename,
+      image_url: publicUrl
+    };
+
+    // 3. Insert into Database
+    const { data, error: dbError } = await supabase
+      .from('transactions')
+      .insert([newRecord])
+      .select();
+
+    if (dbError) {
+      // Rollback storage if DB fails
+      if (finalFilename) {
+        await supabase.storage.from('receipts').remove([finalFilename]);
+      }
+      throw dbError;
+    }
+
+    res.json(data[0]);
+
+  } catch (error) {
+    console.error('Manual Entry Error:', error);
+    res.status(500).json({ error: 'Failed to save transaction', details: error.message });
+  }
+});
+
 // POST API: Upload image, COMPRESS IT, and trigger AI processing
 app.post('/api/upload', authenticate, aiRateLimiter, upload.single('image'), async (req, res) => {
   if (!supabase) {
